@@ -1,0 +1,95 @@
+# Database Schema
+
+Source of truth: [`migrations/0001_init.sql`](migrations/0001_init.sql). This file is a human-readable summary — if the two ever disagree, the migration file wins.
+
+## Entity overview
+
+```
+auth.users (managed by Supabase Auth)
+    │ 1:1 (trigger-created on signup)
+    ▼
+profiles ──┬──< shifts.assigned_to
+           ├──< shifts.created_by
+           ├──< availability.user_id
+           └──< shift_audit.changed_by
+
+shifts ──< shift_audit.shift_id  (snapshotted before every update/delete)
+```
+
+## Tables
+
+### `profiles`
+One row per person, auto-created when they're invited/sign in.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK, references `auth.users(id)`, cascades on delete |
+| `full_name` | `text` | nullable |
+| `phone` | `text` | nullable |
+| `created_at` | `timestamptz` | default `now()` |
+
+### `shifts`
+The core schedule. Self-service: any logged-in user can create/edit/delete any shift.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` |
+| `shift_date` | `date` | not null |
+| `start_time` | `time` | not null |
+| `end_time` | `time` | not null |
+| `position` | `text` | nullable, e.g. "Cashier" |
+| `assigned_to` | `uuid` | nullable FK → `profiles.id`, `on delete set null` |
+| `notes` | `text` | nullable |
+| `created_by` | `uuid` | FK → `profiles.id` |
+| `updated_at` | `timestamptz` | default `now()` |
+
+Indexed on `shift_date`.
+
+### `shift_audit`
+Undo log. A trigger snapshots the row **before** every update/delete on `shifts`, so a change can be reverted.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `shift_id` | `uuid` | the shift that changed (no FK — row may already be gone) |
+| `changed_by` | `uuid` | FK → `profiles.id`, whoever made the change (`auth.uid()`) |
+| `change_type` | `text` | `'update'` or `'delete'` |
+| `old_value` | `jsonb` | full snapshot of the row before the change |
+| `changed_at` | `timestamptz` | default `now()` |
+| `undone` | `boolean` | default `false`, set `true` once someone undoes this entry |
+
+Indexed on `changed_at desc` (activity feed is most-recent-first).
+
+Inserts are not audited — only updates/deletes — since there's nothing to "undo" a creation back to.
+
+### `availability`
+Date ranges a person has marked themselves unavailable (vacation, sick, etc.). Everyone can view; each person manages only their own rows.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `uuid` | PK |
+| `user_id` | `uuid` | FK → `profiles.id`, `on delete cascade` |
+| `start_date` | `date` | not null |
+| `end_date` | `date` | not null, `check (end_date >= start_date)` |
+| `reason` | `text` | nullable |
+| `created_at` | `timestamptz` | default `now()` |
+
+Indexed on `user_id`.
+
+## Triggers & functions
+
+- **`handle_new_user()`** — `after insert on auth.users` → inserts a matching `profiles` row (`full_name` defaults to the invite email if none is set).
+- **`log_shift_change()`** — `before update or delete on public.shifts` → inserts a snapshot into `shift_audit`. Runs as `security definer` so it can write regardless of the caller's own permissions.
+
+## Row-Level Security summary
+
+Every table has RLS enabled; there is no public/anonymous access anywhere — all policies require `authenticated`.
+
+| Table | Select | Insert | Update | Delete |
+|---|---|---|---|---|
+| `profiles` | anyone | — (via trigger only) | own row only | — |
+| `shifts` | anyone | anyone | anyone | anyone |
+| `shift_audit` | anyone | anyone | anyone (used to flip `undone`) | — |
+| `availability` | anyone | own rows only | own rows only | own rows only |
+
+`shifts` is intentionally wide-open for writes (self-service editing per the product design) — safety net is the `shift_audit` undo log, not restricted permissions.
