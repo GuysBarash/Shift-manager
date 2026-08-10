@@ -27,6 +27,17 @@ export function formatDayLabel(date: Date): string {
   });
 }
 
+export function formatDow(date: Date): string {
+  return date.toLocaleDateString(LOCALE, { weekday: "short" }).toUpperCase();
+}
+
+export function formatDDMMYYYY(date: Date): string {
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const yyyy = date.getFullYear();
+  return `${dd}.${mm}.${yyyy}`;
+}
+
 export function formatTime(time: string): string {
   const [h, m] = time.split(":").map(Number);
   const date = new Date(2000, 0, 1, h, m);
