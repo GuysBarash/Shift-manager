@@ -29,18 +29,18 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Shift Manager</CardTitle>
+          <CardTitle>מנהל משמרות</CardTitle>
           <CardDescription>
             {status === "sent"
-              ? "Check your email for a login link."
-              : "Enter your email to get a login link."}
+              ? "בדקו את תיבת הדואר שלכם לקישור התחברות."
+              : "הזינו אימייל כדי לקבל קישור התחברות."}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {status !== "sent" && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">אימייל</Label>
                 <Input
                   id="email"
                   type="email"
@@ -51,11 +51,11 @@ export default function LoginPage() {
                 />
               </div>
               <Button type="submit" className="w-full" disabled={status === "sending"}>
-                {status === "sending" ? "Sending..." : "Send login link"}
+                {status === "sending" ? "שולח..." : "שליחת קישור התחברות"}
               </Button>
               {status === "error" && (
                 <p className="text-sm text-destructive">
-                  Something went wrong. Try again, or ask the admin to invite your email first.
+                  משהו השתבש. נסו שוב, או בקשו מהמנהל להזמין את המייל שלכם קודם.
                 </p>
               )}
             </form>

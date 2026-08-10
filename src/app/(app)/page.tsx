@@ -5,7 +5,6 @@ import { createClient } from "@/lib/supabase/client";
 import {
   addDays,
   formatDDMMYYYY,
-  formatDayLabel,
   formatDow,
   formatHourLabel,
   startOfDay,
@@ -148,8 +147,11 @@ export default function ShiftsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold tracking-wide uppercase glow-text">
-          Shift Grid <span className="text-muted-foreground normal-case">— {formatDayLabel(rangeStart)} onward</span>
+        <h1 className="text-lg font-semibold tracking-wide glow-text">
+          לוח משמרות{" "}
+          <span className="text-muted-foreground">
+            — החל מ{formatDow(rangeStart)} {formatDDMMYYYY(rangeStart)}
+          </span>
         </h1>
         <div className="flex items-center gap-2">
           <ActivityPanel profiles={profiles} />
@@ -158,32 +160,32 @@ export default function ShiftsPage() {
             onClick={() => openNewShift(new Date(), currentHour, columns[0] ?? "")}
           >
             <Plus className="size-4" />
-            New shift
+            משמרת חדשה
           </Button>
         </div>
       </div>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p className="text-sm text-muted-foreground">טוען…</p>
       ) : columns.length === 0 ? (
         <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-          No shifts scheduled yet. Click &quot;New shift&quot; to add the first one.
+          עדיין אין משמרות בלוח. לחצו על &quot;משמרת חדשה&quot; כדי להוסיף את הראשונה.
         </div>
       ) : (
         <div className="max-h-[75vh] overflow-auto rounded-md border border-border/60 glow-border">
           <table className="w-full border-collapse text-sm">
             <thead className="sticky top-0 z-20 bg-card">
               <tr>
-                <th className="sticky left-0 z-30 w-28 min-w-28 border-b border-border/60 bg-card px-3 py-2 text-left font-medium tracking-wide text-muted-foreground uppercase">
-                  Date
+                <th className="sticky start-0 z-30 w-28 min-w-28 border-b border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
+                  תאריך
                 </th>
-                <th className="sticky left-28 z-30 min-w-20 border-b border-l border-border/60 bg-card px-3 py-2 text-left font-medium tracking-wide text-muted-foreground uppercase">
-                  Hour
+                <th className="sticky start-28 z-30 min-w-20 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
+                  שעה
                 </th>
                 {columns.map((col) => (
                   <th
                     key={col}
-                    className="min-w-32 border-b border-l border-border/60 bg-card px-3 py-2 text-left font-medium tracking-wide text-primary uppercase glow-text"
+                    className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
                   >
                     {col}
                   </th>
@@ -263,22 +265,22 @@ function FragmentDay({
             {hour === 0 && (
               <td
                 rowSpan={24}
-                className={`sticky left-0 z-10 border-b border-r border-border/60 bg-secondary/40 px-3 py-1.5 align-top font-mono text-xs ${
+                className={`sticky start-0 z-10 border-b border-e border-border/60 bg-secondary/40 px-3 py-1.5 align-top font-mono text-xs ${
                   isToday ? "text-primary glow-text" : "text-secondary-foreground"
                 }`}
               >
                 <div className="font-bold tracking-widest">{formatDow(day)}</div>
                 <div>{formatDDMMYYYY(day)}</div>
-                {isToday && <div className="mt-1 text-primary glow-text">· today</div>}
+                {isToday && <div className="mt-1 text-primary glow-text">· היום</div>}
               </td>
             )}
             <td
-              className={`sticky left-28 z-10 border-b border-border/60 bg-card px-3 py-1.5 font-mono text-xs ${
+              className={`sticky start-28 z-10 border-b border-border/60 bg-card px-3 py-1.5 font-mono text-xs ${
                 isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
               }`}
             >
               {formatHourLabel(hour)}
-              {isNowRow && <span className="ml-1.5 animate-pulse">◄ now</span>}
+              {isNowRow && <span className="ms-1.5 animate-pulse">◄ עכשיו</span>}
             </td>
             {columns.map((col) => {
               const shift = row[col];
@@ -290,14 +292,14 @@ function FragmentDay({
                 <td
                   key={col}
                   onClick={() => onCellClick(hour, col, shift)}
-                  className={`cursor-pointer border-b border-l border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
+                  className={`cursor-pointer border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
                     isNowRow && !shift ? "bg-primary/10" : ""
                   } ${isMine ? "ring-1 ring-inset ring-primary/50" : ""}`}
                   style={
                     shift
                       ? {
                           backgroundColor: color ? `${color.hex}22` : undefined,
-                          borderLeft: color ? `3px solid ${color.hex}` : undefined,
+                          borderInlineStart: color ? `3px solid ${color.hex}` : undefined,
                         }
                       : undefined
                   }
@@ -307,7 +309,7 @@ function FragmentDay({
                       className="font-medium"
                       style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
                     >
-                      {assignee?.full_name || "Unassigned"}
+                      {assignee?.full_name || "לא משויך"}
                     </span>
                   ) : (
                     <span className="text-muted-foreground/40">·</span>

@@ -82,7 +82,7 @@ export function ShiftDialog({
 
   async function handleSave() {
     if (!shiftDate || !startTime || !endTime) {
-      toast.error("Date, start time, and end time are required.");
+      toast.error("יש למלא תאריך, שעת התחלה ושעת סיום.");
       return;
     }
     setSaving(true);
@@ -106,7 +106,7 @@ export function ShiftDialog({
       toast.error(error.message);
       return;
     }
-    toast.success(shift ? "Shift updated." : "Shift created.");
+    toast.success(shift ? "המשמרת עודכנה." : "המשמרת נוצרה.");
     onOpenChange(false);
     onSaved();
   }
@@ -121,7 +121,7 @@ export function ShiftDialog({
       toast.error(error.message);
       return;
     }
-    toast.success("Shift deleted. You can undo this from Activity.");
+    toast.success("המשמרת נמחקה. ניתן לבטל זאת מההיסטוריה.");
     onOpenChange(false);
     onSaved();
   }
@@ -130,13 +130,13 @@ export function ShiftDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{shift ? "Edit shift" : "New shift"}</DialogTitle>
+          <DialogTitle>{shift ? "עריכת משמרת" : "משמרת חדשה"}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1 space-y-2">
-              <Label htmlFor="shift-date">Date</Label>
+              <Label htmlFor="shift-date">תאריך</Label>
               <Input
                 id="shift-date"
                 type="date"
@@ -145,7 +145,7 @@ export function ShiftDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="start-time">Start</Label>
+              <Label htmlFor="start-time">התחלה</Label>
               <Input
                 id="start-time"
                 type="time"
@@ -154,7 +154,7 @@ export function ShiftDialog({
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="end-time">End</Label>
+              <Label htmlFor="end-time">סיום</Label>
               <Input
                 id="end-time"
                 type="time"
@@ -165,32 +165,32 @@ export function ShiftDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="position">Position</Label>
+            <Label htmlFor="position">תפקיד</Label>
             <Input
               id="position"
-              placeholder="e.g. Cashier"
+              placeholder="למשל קופאי"
               value={position}
               onChange={(e) => setPosition(e.target.value)}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Assigned to</Label>
+            <Label>משויך ל</Label>
             <Select value={assignedTo} onValueChange={(value) => setAssignedTo(value ?? UNASSIGNED)}>
               <SelectTrigger className="w-full">
                 <SelectValue>
                   {(value: string) =>
                     value === UNASSIGNED
-                      ? "Unassigned"
-                      : profiles.find((p) => p.id === value)?.full_name || "Unnamed"
+                      ? "לא משויך"
+                      : profiles.find((p) => p.id === value)?.full_name || "ללא שם"
                   }
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={UNASSIGNED}>Unassigned</SelectItem>
+                <SelectItem value={UNASSIGNED}>לא משויך</SelectItem>
                 {profiles.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
-                    {p.full_name || "Unnamed"}
+                    {p.full_name || "ללא שם"}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -198,12 +198,12 @@ export function ShiftDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
+            <Label htmlFor="notes">הערות</Label>
             <Textarea
               id="notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional"
+              placeholder="אופציונלי"
             />
           </div>
         </div>
@@ -211,13 +211,13 @@ export function ShiftDialog({
         <DialogFooter className="gap-2 sm:justify-between">
           {shift ? (
             <Button variant="destructive" onClick={handleDelete} disabled={saving}>
-              Delete
+              מחיקה
             </Button>
           ) : (
             <span />
           )}
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
+            {saving ? "שומר..." : "שמירה"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -55,7 +55,7 @@ export default function PeoplePage() {
       toast.error(error.message);
       return;
     }
-    toast.success("Profile updated.");
+    toast.success("הפרופיל עודכן.");
     setEditingId(null);
     load();
   }
@@ -63,12 +63,12 @@ export default function PeoplePage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="uppercase tracking-wide glow-text">People</CardTitle>
+        <CardTitle className="tracking-wide glow-text">חברותא</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {loading && <p className="text-sm text-muted-foreground">טוען…</p>}
         {!loading && profiles.length === 0 && (
-          <p className="text-sm text-muted-foreground">No one here yet.</p>
+          <p className="text-sm text-muted-foreground">עדיין אין כאן אף אחד.</p>
         )}
         {profiles.map((p) => {
           const color = personColor(p.id);
@@ -80,20 +80,20 @@ export default function PeoplePage() {
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
-                      <Label htmlFor={`name-${p.id}`}>Full name</Label>
+                      <Label htmlFor={`name-${p.id}`}>שם מלא</Label>
                       <Input id={`name-${p.id}`} value={fullName} onChange={(e) => setFullName(e.target.value)} />
                     </div>
                     <div className="space-y-1">
-                      <Label htmlFor={`phone-${p.id}`}>Phone</Label>
-                      <Input id={`phone-${p.id}`} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+                      <Label htmlFor={`phone-${p.id}`}>טלפון</Label>
+                      <Input id={`phone-${p.id}`} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="אופציונלי" />
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSave} disabled={saving}>
-                      {saving ? "Saving..." : "Save"}
+                      {saving ? "שומר..." : "שמירה"}
                     </Button>
                     <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
-                      Cancel
+                      ביטול
                     </Button>
                   </div>
                 </div>
@@ -109,15 +109,15 @@ export default function PeoplePage() {
                     />
                     <div>
                       <div className="font-medium">
-                        {p.full_name || "Unnamed"}
-                        {isMe && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
+                        {p.full_name || "ללא שם"}
+                        {isMe && <span className="ms-2 text-xs text-muted-foreground">(אני)</span>}
                       </div>
                       {p.phone && <div className="text-sm text-muted-foreground">{p.phone}</div>}
                     </div>
                   </div>
                   {isMe && (
                     <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
-                      Edit
+                      עריכה
                     </Button>
                   )}
                 </div>

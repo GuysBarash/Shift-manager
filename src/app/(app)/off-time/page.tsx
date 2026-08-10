@@ -59,7 +59,7 @@ export default function OffTimePage() {
     e.preventDefault();
     if (!userId) return;
     if (endDate < startDate) {
-      toast.error("End date must be on or after the start date.");
+      toast.error("תאריך הסיום חייב להיות שווה או מאוחר מתאריך ההתחלה.");
       return;
     }
     setSaving(true);
@@ -75,7 +75,7 @@ export default function OffTimePage() {
       toast.error(error.message);
       return;
     }
-    toast.success("Added.");
+    toast.success("נוסף.");
     setReason("");
     load();
   }
@@ -94,24 +94,24 @@ export default function OffTimePage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle className="uppercase tracking-wide glow-text">Mark time off</CardTitle>
+          <CardTitle className="tracking-wide glow-text">סימון חופש</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAdd} className="grid gap-3 sm:grid-cols-4 sm:items-end">
             <div className="space-y-2">
-              <Label htmlFor="start">From</Label>
+              <Label htmlFor="start">מתאריך</Label>
               <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="end">To</Label>
+              <Label htmlFor="end">עד תאריך</Label>
               <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
             <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="reason">Reason (optional)</Label>
-              <Textarea id="reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Vacation, sick, etc." />
+              <Label htmlFor="reason">סיבה (אופציונלי)</Label>
+              <Textarea id="reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="חופשה, מחלה וכו׳" />
             </div>
             <Button type="submit" disabled={saving} className="sm:col-span-4">
-              {saving ? "Adding..." : "Add"}
+              {saving ? "מוסיף..." : "הוספה"}
             </Button>
           </form>
         </CardContent>
@@ -119,12 +119,12 @@ export default function OffTimePage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="uppercase tracking-wide glow-text">Not available for shifts</CardTitle>
+          <CardTitle className="tracking-wide glow-text">לא זמינים למשמרות</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {loading && <p className="text-sm text-muted-foreground">טוען…</p>}
           {!loading && entries.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nobody has marked time off.</p>
+            <p className="text-sm text-muted-foreground">אף אחד לא סימן חופש.</p>
           )}
           {entries.map((entry) => {
             const person = profileById.get(entry.user_id);
@@ -136,9 +136,9 @@ export default function OffTimePage() {
                     className="size-2.5 shrink-0 rounded-full"
                     style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
                   />
-                  <span className="font-medium">{person?.full_name || "Unnamed"}</span>
+                  <span className="font-medium">{person?.full_name || "ללא שם"}</span>
                   <span className="text-muted-foreground">
-                    {entry.start_date} → {entry.end_date}
+                    {entry.start_date} ← {entry.end_date}
                     {entry.reason ? ` · ${entry.reason}` : ""}
                   </span>
                 </div>

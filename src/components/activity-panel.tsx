@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { formatTime } from "@/lib/dates";
+import { formatDDMMYYYY, formatTime } from "@/lib/dates";
 import type { Profile, ShiftAudit } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,13 +76,13 @@ export function ActivityPanel({ profiles }: { profiles: Profile[] }) {
             .eq("id", entry.shift_id);
 
     if (result.error) {
-      toast.error(`Couldn't undo: ${result.error.message}`);
+      toast.error(`לא ניתן לבטל: ${result.error.message}`);
       setUndoingId(null);
       return;
     }
 
     await supabase.from("shift_audit").update({ undone: true }).eq("id", entry.id);
-    toast.success("Change undone.");
+    toast.success("השינוי בוטל.");
     setUndoingId(null);
     load();
   }
@@ -91,37 +91,37 @@ export function ActivityPanel({ profiles }: { profiles: Profile[] }) {
     <Sheet open={open} onOpenChange={setOpen}>
       <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         <History className="size-4" />
-        History
+        היסטוריה
       </Button>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader>
-          <SheetTitle className="uppercase tracking-wide glow-text">Activity log</SheetTitle>
+          <SheetTitle className="tracking-wide glow-text">יומן פעילות</SheetTitle>
         </SheetHeader>
         <div className="flex-1 space-y-2 overflow-y-auto px-4 pb-4">
-          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {loading && <p className="text-sm text-muted-foreground">טוען…</p>}
           {!loading && entries.length === 0 && (
-            <p className="text-sm text-muted-foreground">No changes yet.</p>
+            <p className="text-sm text-muted-foreground">עדיין אין שינויים.</p>
           )}
           {entries.map((entry) => {
             const who = entry.changed_by ? profileById.get(entry.changed_by) : null;
             const old = entry.old_value;
+            const changedAt = new Date(entry.changed_at);
+            const changedAtLabel = `${formatDDMMYYYY(changedAt)} ${String(changedAt.getHours()).padStart(2, "0")}:${String(changedAt.getMinutes()).padStart(2, "0")}`;
             return (
               <div key={entry.id} className="space-y-2 rounded-md border border-border/60 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <Badge variant={entry.change_type === "delete" ? "destructive" : "secondary"}>
-                    {entry.change_type}
+                    {entry.change_type === "delete" ? "מחיקה" : "עדכון"}
                   </Badge>
-                  <span className="font-medium">{who?.full_name || "Someone"}</span>
+                  <span className="font-medium">{who?.full_name || "מישהו"}</span>
                 </div>
-                <div className="text-muted-foreground">
-                  {new Date(entry.changed_at).toLocaleString()}
-                </div>
+                <div className="text-muted-foreground">{changedAtLabel}</div>
                 <div className="text-muted-foreground">
                   {old.shift_date} · {formatTime(old.start_time)}–{formatTime(old.end_time)}
                   {old.position ? ` · ${old.position}` : ""}
                 </div>
                 {entry.undone ? (
-                  <span className="text-xs text-muted-foreground">Undone</span>
+                  <span className="text-xs text-muted-foreground">בוטל</span>
                 ) : (
                   <Button
                     variant="outline"
@@ -129,7 +129,7 @@ export function ActivityPanel({ profiles }: { profiles: Profile[] }) {
                     disabled={undoingId === entry.id}
                     onClick={() => handleUndo(entry)}
                   >
-                    {undoingId === entry.id ? "Undoing..." : "Undo"}
+                    {undoingId === entry.id ? "מבטל..." : "ביטול"}
                   </Button>
                 )}
               </div>

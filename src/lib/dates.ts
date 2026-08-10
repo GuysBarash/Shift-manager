@@ -15,20 +15,12 @@ export function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
 }
 
-// A fixed locale (rather than the browser/server default) keeps server-rendered
-// and client-rendered text identical and avoids React hydration mismatches.
-const LOCALE = "en-US";
-
-export function formatDayLabel(date: Date): string {
-  return date.toLocaleDateString(LOCALE, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  });
-}
+// Hardcoded (not Intl-derived) so server and client always render identical
+// text — locale-dependent formatting caused a real hydration mismatch before.
+const HE_DOW = ["יום א׳", "יום ב׳", "יום ג׳", "יום ד׳", "יום ה׳", "יום ו׳", "שבת"];
 
 export function formatDow(date: Date): string {
-  return date.toLocaleDateString(LOCALE, { weekday: "short" }).toUpperCase();
+  return HE_DOW[date.getDay()];
 }
 
 export function formatDDMMYYYY(date: Date): string {
@@ -39,14 +31,9 @@ export function formatDDMMYYYY(date: Date): string {
 }
 
 export function formatTime(time: string): string {
-  const [h, m] = time.split(":").map(Number);
-  const date = new Date(2000, 0, 1, h, m);
-  return date.toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit" });
+  return time.slice(0, 5);
 }
 
 export function formatHourLabel(hour: number): string {
-  return new Date(2000, 0, 1, hour, 0).toLocaleTimeString(LOCALE, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return `${String(hour).padStart(2, "0")}:00`;
 }

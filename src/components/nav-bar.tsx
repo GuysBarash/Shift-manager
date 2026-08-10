@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/people", label: "People" },
-  { href: "/off-time", label: "Off-time" },
-  { href: "/", label: "Shifts" },
+  { href: "/people", label: "חברותא" },
+  { href: "/off-time", label: "חופש" },
+  { href: "/", label: "משמרות" },
 ];
 
 export function NavBar() {
@@ -46,7 +46,7 @@ export function NavBar() {
           })}
         </nav>
         <Button variant="outline" size="sm" onClick={handleLogout}>
-          Log out
+          התנתקות
         </Button>
       </div>
     </header>
