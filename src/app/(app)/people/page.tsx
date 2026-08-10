@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { useDemoIdentity } from "@/lib/demo-identity";
 import { PALETTE, personColor } from "@/lib/person-color";
 import type { Profile } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +13,9 @@ import { Label } from "@/components/ui/label";
 import { Check } from "lucide-react";
 
 export default function PeoplePage() {
+  const { identity } = useDemoIdentity();
+  const userId = identity.userId;
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
@@ -24,12 +26,11 @@ export default function PeoplePage() {
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    const [{ data: userData }, { data: profileRows, error }] = await Promise.all([
-      supabase.auth.getUser(),
-      supabase.from("profiles").select("*").order("full_name", { ascending: true }),
-    ]);
+    const { data: profileRows, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("full_name", { ascending: true });
     if (error) console.error(error);
-    setUserId(userData.user?.id ?? null);
     setProfiles(profileRows ?? []);
     setLoading(false);
   }

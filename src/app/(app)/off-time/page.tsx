@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { toISODate } from "@/lib/dates";
+import { useDemoIdentity } from "@/lib/demo-identity";
 import { personColor } from "@/lib/person-color";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
@@ -13,9 +14,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 
 export default function OffTimePage() {
+  const { identity } = useDemoIdentity();
+  const userId = identity.userId;
   const [entries, setEntries] = useState<TimeOff[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -32,18 +34,15 @@ export default function OffTimePage() {
     setLoading(true);
     const supabase = createClient();
     const today = toISODate(new Date());
-    const [{ data: userData }, { data: timeOffRows, error: timeOffError }, { data: profileRows }] =
-      await Promise.all([
-        supabase.auth.getUser(),
-        supabase
-          .from("time_off")
-          .select("*")
-          .gte("end_date", today)
-          .order("start_date", { ascending: true }),
-        supabase.from("profiles").select("*"),
-      ]);
+    const [{ data: timeOffRows, error: timeOffError }, { data: profileRows }] = await Promise.all([
+      supabase
+        .from("time_off")
+        .select("*")
+        .gte("end_date", today)
+        .order("start_date", { ascending: true }),
+      supabase.from("profiles").select("*"),
+    ]);
     if (timeOffError) console.error(timeOffError);
-    setUserId(userData.user?.id ?? null);
     setEntries(timeOffRows ?? []);
     setProfiles(profileRows ?? []);
     setLoading(false);
@@ -55,7 +54,6 @@ export default function OffTimePage() {
 
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId) return;
     if (endDate < startDate) {
       toast.error("תאריך הסיום חייב להיות שווה או מאוחר מתאריך ההתחלה.");
       return;

@@ -13,6 +13,7 @@ import {
   toISODate,
 } from "@/lib/dates";
 import { personColor } from "@/lib/person-color";
+import { useDemoIdentity } from "@/lib/demo-identity";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -80,10 +81,11 @@ function buildPersonHourGrid(dayShifts: Shift[], personIds: string[]): Record<st
 type Brush = "erase" | string | null;
 
 export default function ShiftsPage() {
+  const { identity } = useDemoIdentity();
+  const userId = identity.userId;
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [timeOff, setTimeOff] = useState<TimeOff[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [extended, setExtended] = useState(false);
@@ -188,11 +190,6 @@ export default function ShiftsPage() {
   }, [rangeStart]);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
-  }, []);
-
-  useEffect(() => {
     load();
   }, [load]);
 
@@ -228,7 +225,6 @@ export default function ShiftsPage() {
   }
 
   function scrollToNextMine() {
-    if (!userId) return;
     const nowKey = `${todayIso}T${String(currentHour).padStart(2, "0")}`;
     let best: { date: string; hour: number; key: string } | null = null;
     for (const s of shifts) {
@@ -254,7 +250,6 @@ export default function ShiftsPage() {
     assignedTo: string | null,
     notes: string | null
   ) {
-    if (!userId) return;
     const supabase = createClient();
     const tempId = `temp-${Math.random().toString(36).slice(2)}`;
     const optimistic: Shift = {
@@ -294,7 +289,7 @@ export default function ShiftsPage() {
   // shift splits it, leaving the untouched hours as separate rows instead of
   // affecting the whole block.
   function paintCell(day: Date, hour: number, col: string, existingShift: Shift | null) {
-    if (!brush || !userId) return;
+    if (!brush) return;
     const supabase = createClient();
     const shiftDate = toISODate(day);
     const hourStart = `${String(hour).padStart(2, "0")}:00:00`;
@@ -562,7 +557,7 @@ function FragmentDay({
   isToday: boolean;
   currentHour: number;
   profileById: Map<string, Profile>;
-  userId: string | null;
+  userId: string;
   brushActive: boolean;
   onPaintDown: (hour: number, col: string, shift: Shift | null) => void;
   onPaintEnter: (hour: number, col: string, shift: Shift | null) => void;

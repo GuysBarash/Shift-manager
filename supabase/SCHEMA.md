@@ -2,6 +2,14 @@
 
 Source of truth: the files in [`migrations/`](migrations). This file is a human-readable summary — if they ever disagree, the migrations win.
 
+> **⚠️ Temporary demo mode is currently active** (migration `20260101000003_temporary_demo_open_access.sql`).
+> The database is open to anonymous (`anon`) access and `profiles.id` no longer requires a matching
+> `auth.users` row, so the app can run on a cookie-based name picker (`src/lib/demo-identity.tsx`)
+> instead of real login. Real Supabase Auth (magic link) still works underneath — see that
+> migration's header comment for exact revert steps before a real launch, and also restore
+> `src/proxy.ts` (currently bypasses the auth redirect) and re-wire the pages that use
+> `useDemoIdentity()` back to `supabase.auth.getUser()`.
+
 ## Entity overview
 
 ```
@@ -23,7 +31,7 @@ One row per person, auto-created when they're invited/sign in.
 
 | Column | Type | Notes |
 |---|---|---|
-| `id` | `uuid` | PK, references `auth.users(id)`, cascades on delete |
+| `id` | `uuid` | PK; normally FK → `auth.users(id)` cascading on delete — **temporarily dropped** for demo mode, see warning above |
 | `full_name` | `text` | nullable |
 | `phone` | `text` | nullable |
 | `color` | `text` | nullable, explicit palette pick (see `src/lib/person-color.ts`); `null` = auto-assigned via hash of `id` |
@@ -83,7 +91,7 @@ Indexed on `user_id`.
 
 ## Row-Level Security summary
 
-Every table has RLS enabled; there is no public/anonymous access anywhere — all policies require `authenticated`.
+Every table has RLS enabled. The table below is the original design (all policies require `authenticated`); demo mode currently layers matching `anon`-role policies on top of every table (fully open, no ownership checks) — see the warning above.
 
 | Table | Select | Insert | Update | Delete |
 |---|---|---|---|---|
