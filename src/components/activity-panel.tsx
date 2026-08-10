@@ -6,12 +6,18 @@ import { createClient } from "@/lib/supabase/client";
 import { formatTime } from "@/lib/dates";
 import type { Profile, ShiftAudit } from "@/types/database";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { History } from "lucide-react";
 
-export default function ActivityPage() {
+export function ActivityPanel({ profiles }: { profiles: Profile[] }) {
+  const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<ShiftAudit[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [undoingId, setUndoingId] = useState<string | null>(null);
 
@@ -24,23 +30,19 @@ export default function ActivityPage() {
   const load = useCallback(async () => {
     setLoading(true);
     const supabase = createClient();
-    const [{ data: auditRows, error }, { data: profileRows }] = await Promise.all([
-      supabase
-        .from("shift_audit")
-        .select("*")
-        .order("changed_at", { ascending: false })
-        .limit(50),
-      supabase.from("profiles").select("*"),
-    ]);
+    const { data, error } = await supabase
+      .from("shift_audit")
+      .select("*")
+      .order("changed_at", { ascending: false })
+      .limit(50);
     if (error) console.error(error);
-    setEntries(auditRows ?? []);
-    setProfiles(profileRows ?? []);
+    setEntries(data ?? []);
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (open) load();
+  }, [open, load]);
 
   async function handleUndo(entry: ShiftAudit) {
     setUndoingId(entry.id);
@@ -86,51 +88,55 @@ export default function ActivityPage() {
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Recent activity</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-        {!loading && entries.length === 0 && (
-          <p className="text-sm text-muted-foreground">No changes yet.</p>
-        )}
-        {entries.map((entry) => {
-          const who = entry.changed_by ? profileById.get(entry.changed_by) : null;
-          const old = entry.old_value;
-          return (
-            <div key={entry.id} className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
-              <div className="space-y-1">
+    <Sheet open={open} onOpenChange={setOpen}>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <History className="size-4" />
+        History
+      </Button>
+      <SheetContent className="w-full sm:max-w-md">
+        <SheetHeader>
+          <SheetTitle className="uppercase tracking-wide glow-text">Activity log</SheetTitle>
+        </SheetHeader>
+        <div className="flex-1 space-y-2 overflow-y-auto px-4 pb-4">
+          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
+          {!loading && entries.length === 0 && (
+            <p className="text-sm text-muted-foreground">No changes yet.</p>
+          )}
+          {entries.map((entry) => {
+            const who = entry.changed_by ? profileById.get(entry.changed_by) : null;
+            const old = entry.old_value;
+            return (
+              <div key={entry.id} className="space-y-2 rounded-md border border-border/60 p-3 text-sm">
                 <div className="flex items-center gap-2">
                   <Badge variant={entry.change_type === "delete" ? "destructive" : "secondary"}>
                     {entry.change_type}
                   </Badge>
                   <span className="font-medium">{who?.full_name || "Someone"}</span>
-                  <span className="text-muted-foreground">
-                    {new Date(entry.changed_at).toLocaleString()}
-                  </span>
+                </div>
+                <div className="text-muted-foreground">
+                  {new Date(entry.changed_at).toLocaleString()}
                 </div>
                 <div className="text-muted-foreground">
                   {old.shift_date} · {formatTime(old.start_time)}–{formatTime(old.end_time)}
                   {old.position ? ` · ${old.position}` : ""}
                 </div>
+                {entry.undone ? (
+                  <span className="text-xs text-muted-foreground">Undone</span>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={undoingId === entry.id}
+                    onClick={() => handleUndo(entry)}
+                  >
+                    {undoingId === entry.id ? "Undoing..." : "Undo"}
+                  </Button>
+                )}
               </div>
-              {entry.undone ? (
-                <span className="text-xs text-muted-foreground">Undone</span>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={undoingId === entry.id}
-                  onClick={() => handleUndo(entry)}
-                >
-                  {undoingId === entry.id ? "Undoing..." : "Undo"}
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
+            );
+          })}
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }

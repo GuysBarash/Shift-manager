@@ -26,11 +26,19 @@ import {
 
 const UNASSIGNED = "unassigned";
 
+function addHours(time: string, hours: number): string {
+  const [h, m] = time.split(":").map(Number);
+  const total = (h + hours) % 24;
+  return `${String(total).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export function ShiftDialog({
   open,
   onOpenChange,
   shift,
   defaultDate,
+  defaultStartTime = "09:00",
+  defaultPosition = "",
   profiles,
   currentUserId,
   onSaved,
@@ -39,6 +47,8 @@ export function ShiftDialog({
   onOpenChange: (open: boolean) => void;
   shift: Shift | null;
   defaultDate: Date;
+  defaultStartTime?: string;
+  defaultPosition?: string;
   profiles: Profile[];
   currentUserId: string;
   onSaved: () => void;
@@ -62,13 +72,13 @@ export function ShiftDialog({
       setNotes(shift.notes ?? "");
     } else {
       setShiftDate(toISODate(defaultDate));
-      setStartTime("09:00");
-      setEndTime("17:00");
-      setPosition("");
+      setStartTime(defaultStartTime);
+      setEndTime(addHours(defaultStartTime, 4));
+      setPosition(defaultPosition);
       setAssignedTo(UNASSIGNED);
       setNotes("");
     }
-  }, [open, shift, defaultDate]);
+  }, [open, shift, defaultDate, defaultStartTime, defaultPosition]);
 
   async function handleSave() {
     if (!shiftDate || !startTime || !endTime) {

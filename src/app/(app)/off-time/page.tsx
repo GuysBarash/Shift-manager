@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { toISODate } from "@/lib/dates";
-import type { Availability, Profile } from "@/types/database";
+import { personColor } from "@/lib/person-color";
+import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 
-export default function AvailabilityPage() {
-  const [entries, setEntries] = useState<Availability[]>([]);
+export default function OffTimePage() {
+  const [entries, setEntries] = useState<TimeOff[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,19 +34,19 @@ export default function AvailabilityPage() {
     setLoading(true);
     const supabase = createClient();
     const today = toISODate(new Date());
-    const [{ data: userData }, { data: availRows, error: availError }, { data: profileRows }] =
+    const [{ data: userData }, { data: timeOffRows, error: timeOffError }, { data: profileRows }] =
       await Promise.all([
         supabase.auth.getUser(),
         supabase
-          .from("availability")
+          .from("time_off")
           .select("*")
           .gte("end_date", today)
           .order("start_date", { ascending: true }),
         supabase.from("profiles").select("*"),
       ]);
-    if (availError) console.error(availError);
+    if (timeOffError) console.error(timeOffError);
     setUserId(userData.user?.id ?? null);
-    setEntries(availRows ?? []);
+    setEntries(timeOffRows ?? []);
     setProfiles(profileRows ?? []);
     setLoading(false);
   }, []);
@@ -63,7 +64,7 @@ export default function AvailabilityPage() {
     }
     setSaving(true);
     const supabase = createClient();
-    const { error } = await supabase.from("availability").insert({
+    const { error } = await supabase.from("time_off").insert({
       user_id: userId,
       start_date: startDate,
       end_date: endDate,
@@ -81,7 +82,7 @@ export default function AvailabilityPage() {
 
   async function handleDelete(id: string) {
     const supabase = createClient();
-    const { error } = await supabase.from("availability").delete().eq("id", id);
+    const { error } = await supabase.from("time_off").delete().eq("id", id);
     if (error) {
       toast.error(error.message);
       return;
@@ -93,7 +94,7 @@ export default function AvailabilityPage() {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Mark yourself unavailable</CardTitle>
+          <CardTitle className="uppercase tracking-wide glow-text">Mark time off</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleAdd} className="grid gap-3 sm:grid-cols-4 sm:items-end">
@@ -118,7 +119,7 @@ export default function AvailabilityPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Upcoming unavailability</CardTitle>
+          <CardTitle className="uppercase tracking-wide glow-text">Not available for shifts</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
           {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
@@ -127,10 +128,15 @@ export default function AvailabilityPage() {
           )}
           {entries.map((entry) => {
             const person = profileById.get(entry.user_id);
+            const color = personColor(entry.user_id);
             return (
-              <div key={entry.id} className="flex items-center justify-between rounded-md border p-2 text-sm">
-                <div>
-                  <span className="font-medium">{person?.full_name || "Unnamed"}</span>{" "}
+              <div key={entry.id} className="flex items-center justify-between rounded-md border border-border/60 p-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="size-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
+                  />
+                  <span className="font-medium">{person?.full_name || "Unnamed"}</span>
                   <span className="text-muted-foreground">
                     {entry.start_date} → {entry.end_date}
                     {entry.reason ? ` · ${entry.reason}` : ""}

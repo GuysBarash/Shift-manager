@@ -1,6 +1,6 @@
 # Database Schema
 
-Source of truth: [`migrations/0001_init.sql`](migrations/0001_init.sql). This file is a human-readable summary — if the two ever disagree, the migration file wins.
+Source of truth: the files in [`migrations/`](migrations). This file is a human-readable summary — if they ever disagree, the migrations win.
 
 ## Entity overview
 
@@ -10,7 +10,7 @@ auth.users (managed by Supabase Auth)
     ▼
 profiles ──┬──< shifts.assigned_to
            ├──< shifts.created_by
-           ├──< availability.user_id
+           ├──< time_off.user_id
            └──< shift_audit.changed_by
 
 shifts ──< shift_audit.shift_id  (snapshotted before every update/delete)
@@ -62,7 +62,7 @@ Indexed on `changed_at desc` (activity feed is most-recent-first).
 
 Inserts are not audited — only updates/deletes — since there's nothing to "undo" a creation back to.
 
-### `availability`
+### `time_off`
 Date ranges a person has marked themselves unavailable (vacation, sick, etc.). Everyone can view; each person manages only their own rows.
 
 | Column | Type | Notes |
@@ -90,6 +90,6 @@ Every table has RLS enabled; there is no public/anonymous access anywhere — al
 | `profiles` | anyone | — (via trigger only) | own row only | — |
 | `shifts` | anyone | anyone | anyone | anyone |
 | `shift_audit` | anyone | anyone | anyone (used to flip `undone`) | — |
-| `availability` | anyone | own rows only | own rows only | own rows only |
+| `time_off` | anyone | own rows only | own rows only | own rows only |
 
 `shifts` is intentionally wide-open for writes (self-service editing per the product design) — safety net is the `shift_audit` undo log, not restricted permissions.

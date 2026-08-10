@@ -27,7 +27,7 @@ export type ShiftAudit = {
   undone: boolean;
 };
 
-export type Availability = {
+export type TimeOff = {
   id: string;
   user_id: string;
   start_date: string;
@@ -61,14 +61,14 @@ export type Database = {
         Update: Partial<ShiftAudit>;
         Relationships: [];
       };
-      availability: {
-        Row: Availability;
-        Insert: Partial<Availability> & {
+      time_off: {
+        Row: TimeOff;
+        Insert: Partial<TimeOff> & {
           user_id: string;
           start_date: string;
           end_date: string;
         };
-        Update: Partial<Availability>;
+        Update: Partial<TimeOff>;
         Relationships: [];
       };
     };

@@ -7,20 +7,12 @@ export function toISODate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-export function startOfWeek(date: Date): Date {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const day = d.getDay(); // 0 = Sunday
-  const diff = day === 0 ? -6 : 1 - day; // Monday as start of week
-  d.setDate(d.getDate() + diff);
-  return d;
+export function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 export function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
-}
-
-export function weekDays(weekStart: Date): Date[] {
-  return Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
 }
 
 // A fixed locale (rather than the browser/server default) keeps server-rendered
@@ -35,22 +27,15 @@ export function formatDayLabel(date: Date): string {
   });
 }
 
-export function formatWeekRange(weekStart: Date): string {
-  const end = addDays(weekStart, 6);
-  const startLabel = weekStart.toLocaleDateString(LOCALE, {
-    month: "short",
-    day: "numeric",
-  });
-  const endLabel = end.toLocaleDateString(LOCALE, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  return `${startLabel} – ${endLabel}`;
-}
-
 export function formatTime(time: string): string {
   const [h, m] = time.split(":").map(Number);
   const date = new Date(2000, 0, 1, h, m);
   return date.toLocaleTimeString(LOCALE, { hour: "numeric", minute: "2-digit" });
+}
+
+export function formatHourLabel(hour: number): string {
+  return new Date(2000, 0, 1, hour, 0).toLocaleTimeString(LOCALE, {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
