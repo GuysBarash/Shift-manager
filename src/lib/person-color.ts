@@ -1,6 +1,7 @@
-// Deterministic, distinct accent color per person — derived from their id so it's
-// stable across reloads without needing a dedicated color column in the database.
-const PALETTE = [
+// Distinct accent color per person. Defaults to a deterministic hash of their
+// id (stable across reloads with no setup needed), but a person can override
+// it with an explicit pick from the same palette (see Profile.color).
+export const PALETTE = [
   { name: "green", hex: "#4ade80", ring: "oklch(0.8 0.19 150)" },
   { name: "cyan", hex: "#22d3ee", ring: "oklch(0.78 0.14 200)" },
   { name: "amber", hex: "#fbbf24", ring: "oklch(0.8 0.16 85)" },
@@ -19,7 +20,11 @@ function hashString(value: string): number {
   return hash;
 }
 
-export function personColor(id: string | null | undefined) {
+export function personColor(id: string | null | undefined, colorKey?: string | null) {
+  if (colorKey) {
+    const explicit = PALETTE.find((c) => c.name === colorKey);
+    if (explicit) return explicit;
+  }
   if (!id) return null;
   const index = hashString(id) % PALETTE.length;
   return PALETTE[index];

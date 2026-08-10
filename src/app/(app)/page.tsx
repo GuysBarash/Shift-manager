@@ -285,7 +285,7 @@ function FragmentDay({
             {columns.map((col) => {
               const shift = row[col];
               const assignee = shift?.assigned_to ? profileById.get(shift.assigned_to) : null;
-              const color = shift?.assigned_to ? personColor(shift.assigned_to) : null;
+              const color = shift?.assigned_to ? personColor(shift.assigned_to, assignee?.color) : null;
               const isMine = shift?.assigned_to === userId;
 
               return (

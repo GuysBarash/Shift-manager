@@ -26,6 +26,7 @@ One row per person, auto-created when they're invited/sign in.
 | `id` | `uuid` | PK, references `auth.users(id)`, cascades on delete |
 | `full_name` | `text` | nullable |
 | `phone` | `text` | nullable |
+| `color` | `text` | nullable, explicit palette pick (see `src/lib/person-color.ts`); `null` = auto-assigned via hash of `id` |
 | `created_at` | `timestamptz` | default `now()` |
 
 ### `shifts`
@@ -71,7 +72,6 @@ Date ranges a person has marked themselves unavailable (vacation, sick, etc.). E
 | `user_id` | `uuid` | FK → `profiles.id`, `on delete cascade` |
 | `start_date` | `date` | not null |
 | `end_date` | `date` | not null, `check (end_date >= start_date)` |
-| `reason` | `text` | nullable |
 | `created_at` | `timestamptz` | default `now()` |
 
 Indexed on `user_id`.

@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { personColor } from "@/lib/person-color";
+import { PALETTE, personColor } from "@/lib/person-color";
 import type { Profile } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Check } from "lucide-react";
 
 export default function PeoplePage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -17,6 +18,7 @@ export default function PeoplePage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
+  const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -40,6 +42,7 @@ export default function PeoplePage() {
     setEditingId(p.id);
     setFullName(p.full_name ?? "");
     setPhone(p.phone ?? "");
+    setSelectedColor(p.color);
   }
 
   async function handleSave() {
@@ -48,7 +51,7 @@ export default function PeoplePage() {
     const supabase = createClient();
     const { error } = await supabase
       .from("profiles")
-      .update({ full_name: fullName, phone })
+      .update({ full_name: fullName, phone, color: selectedColor })
       .eq("id", editingId);
     setSaving(false);
     if (error) {
@@ -59,6 +62,13 @@ export default function PeoplePage() {
     setEditingId(null);
     load();
   }
+
+  // Colors already in use by someone else (auto-assigned or chosen) — not offered.
+  const takenByOthers = new Set(
+    profiles
+      .filter((p) => p.id !== editingId)
+      .map((p) => personColor(p.id, p.color)?.name)
+  );
 
   return (
     <Card>
@@ -71,7 +81,7 @@ export default function PeoplePage() {
           <p className="text-sm text-muted-foreground">עדיין אין כאן אף אחד.</p>
         )}
         {profiles.map((p) => {
-          const color = personColor(p.id);
+          const color = personColor(p.id, p.color);
           const isMe = p.id === userId;
           const isEditing = editingId === p.id;
           return (
@@ -86,6 +96,44 @@ export default function PeoplePage() {
                     <div className="space-y-1">
                       <Label htmlFor={`phone-${p.id}`}>טלפון</Label>
                       <Input id={`phone-${p.id}`} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="אופציונלי" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>צבע</Label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedColor(null)}
+                        className={`rounded-full border px-2.5 py-1 text-xs ${
+                          selectedColor === null
+                            ? "border-primary text-primary glow-text"
+                            : "border-border/60 text-muted-foreground"
+                        }`}
+                      >
+                        אוטומטי
+                      </button>
+                      {PALETTE.map((c) => {
+                        const taken = takenByOthers.has(c.name) && selectedColor !== c.name;
+                        const selected = selectedColor === c.name;
+                        return (
+                          <button
+                            key={c.name}
+                            type="button"
+                            disabled={taken}
+                            onClick={() => setSelectedColor(c.name)}
+                            title={taken ? "בשימוש על ידי מישהו אחר" : c.name}
+                            className={`flex size-7 items-center justify-center rounded-full transition-opacity ${
+                              taken ? "cursor-not-allowed opacity-25" : "cursor-pointer"
+                            }`}
+                            style={{
+                              backgroundColor: c.hex,
+                              boxShadow: selected ? `0 0 0 2px var(--card), 0 0 0 4px ${c.hex}` : undefined,
+                            }}
+                          >
+                            {selected && <Check className="size-3.5 text-black/70" />}
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                   <div className="flex gap-2">

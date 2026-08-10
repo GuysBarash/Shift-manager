@@ -2,6 +2,7 @@ export type Profile = {
   id: string;
   full_name: string | null;
   phone: string | null;
+  color: string | null;
   created_at: string;
 };
 
@@ -32,7 +33,6 @@ export type TimeOff = {
   user_id: string;
   start_date: string;
   end_date: string;
-  reason: string | null;
   created_at: string;
 };
 

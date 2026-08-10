@@ -9,7 +9,6 @@ import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2 } from "lucide-react";
 
@@ -22,7 +21,6 @@ export default function OffTimePage() {
 
   const [startDate, setStartDate] = useState(toISODate(new Date()));
   const [endDate, setEndDate] = useState(toISODate(new Date()));
-  const [reason, setReason] = useState("");
 
   const profileById = useMemo(() => {
     const map = new Map<string, Profile>();
@@ -68,7 +66,6 @@ export default function OffTimePage() {
       user_id: userId,
       start_date: startDate,
       end_date: endDate,
-      reason: reason || null,
     });
     setSaving(false);
     if (error) {
@@ -76,7 +73,6 @@ export default function OffTimePage() {
       return;
     }
     toast.success("נוסף.");
-    setReason("");
     load();
   }
 
@@ -97,7 +93,7 @@ export default function OffTimePage() {
           <CardTitle className="tracking-wide glow-text">סימון חופש</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleAdd} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+          <form onSubmit={handleAdd} className="grid gap-3 sm:grid-cols-3 sm:items-end">
             <div className="space-y-2">
               <Label htmlFor="start">מתאריך</Label>
               <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -106,11 +102,7 @@ export default function OffTimePage() {
               <Label htmlFor="end">עד תאריך</Label>
               <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
             </div>
-            <div className="space-y-2 sm:col-span-2">
-              <Label htmlFor="reason">סיבה (אופציונלי)</Label>
-              <Textarea id="reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="חופשה, מחלה וכו׳" />
-            </div>
-            <Button type="submit" disabled={saving} className="sm:col-span-4">
+            <Button type="submit" disabled={saving}>
               {saving ? "מוסיף..." : "הוספה"}
             </Button>
           </form>
@@ -128,7 +120,7 @@ export default function OffTimePage() {
           )}
           {entries.map((entry) => {
             const person = profileById.get(entry.user_id);
-            const color = personColor(entry.user_id);
+            const color = personColor(entry.user_id, person?.color);
             return (
               <div key={entry.id} className="flex items-center justify-between rounded-md border border-border/60 p-2 text-sm">
                 <div className="flex items-center gap-2">
@@ -139,7 +131,6 @@ export default function OffTimePage() {
                   <span className="font-medium">{person?.full_name || "ללא שם"}</span>
                   <span className="text-muted-foreground">
                     {entry.start_date} ← {entry.end_date}
-                    {entry.reason ? ` · ${entry.reason}` : ""}
                   </span>
                 </div>
                 {entry.user_id === userId && (
