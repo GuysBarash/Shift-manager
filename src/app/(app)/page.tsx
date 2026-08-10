@@ -11,13 +11,15 @@ import {
   toISODate,
 } from "@/lib/dates";
 import { personColor } from "@/lib/person-color";
-import type { Profile, Shift } from "@/types/database";
+import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { ShiftDialog } from "@/components/shift-dialog";
 import { ActivityPanel } from "@/components/activity-panel";
 import { Plus } from "lucide-react";
 
 const RANGE_DAYS = 7;
+const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 
 function buildDayGrid(dayShifts: Shift[], columns: string[]): Record<string, Shift | null>[] {
   const hourOwner: Record<string, (Shift | null)[]> = {};
@@ -46,12 +48,42 @@ function buildDayGrid(dayShifts: Shift[], columns: string[]): Record<string, Shi
   return rows;
 }
 
+// Same idea as buildDayGrid, but keyed by person (across all positions) instead
+// of by position — powers the "extended" per-person status table.
+function buildPersonHourGrid(dayShifts: Shift[], personIds: string[]): Record<string, boolean>[] {
+  const hourOwner: Record<string, boolean[]> = {};
+  for (const pid of personIds) {
+    hourOwner[pid] = new Array(24).fill(false);
+  }
+  for (const shift of dayShifts) {
+    if (!shift.assigned_to || !hourOwner[shift.assigned_to]) continue;
+    const [startH] = shift.start_time.split(":").map(Number);
+    const [endH, endM, endS] = shift.end_time.split(":").map(Number);
+    const lastHour = endM === 0 && (endS ?? 0) === 0 ? endH - 1 : endH;
+    for (let h = startH; h <= lastHour && h < 24; h++) {
+      hourOwner[shift.assigned_to][h] = true;
+    }
+  }
+
+  const rows: Record<string, boolean>[] = [];
+  for (let h = 0; h < 24; h++) {
+    const row: Record<string, boolean> = {};
+    for (const pid of personIds) {
+      row[pid] = hourOwner[pid][h];
+    }
+    rows.push(row);
+  }
+  return rows;
+}
+
 export default function ShiftsPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [timeOff, setTimeOff] = useState<TimeOff[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => new Date());
+  const [extended, setExtended] = useState(false);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
@@ -89,28 +121,50 @@ export default function ShiftsPage() {
     return map;
   }, [shifts]);
 
+  const timeOffByPerson = useMemo(() => {
+    const map = new Map<string, TimeOff[]>();
+    timeOff.forEach((t) => {
+      const list = map.get(t.user_id) ?? [];
+      list.push(t);
+      map.set(t.user_id, list);
+    });
+    return map;
+  }, [timeOff]);
+
+  function isOnTimeOff(personId: string, dateIso: string): boolean {
+    const entries = timeOffByPerson.get(personId);
+    if (!entries) return false;
+    return entries.some((t) => t.start_date <= dateIso && dateIso <= t.end_date);
+  }
+
   const load = useCallback(async () => {
     setLoading(true);
     const supabase = createClient();
     const from = toISODate(rangeStart);
     const to = toISODate(addDays(rangeStart, RANGE_DAYS - 1));
 
-    const [{ data: shiftRows, error: shiftError }, { data: profileRows, error: profileError }] =
-      await Promise.all([
-        supabase
-          .from("shifts")
-          .select("*")
-          .gte("shift_date", from)
-          .lte("shift_date", to)
-          .order("start_time", { ascending: true }),
-        supabase.from("profiles").select("*").order("full_name", { ascending: true }),
-      ]);
+    const [
+      { data: shiftRows, error: shiftError },
+      { data: profileRows, error: profileError },
+      { data: timeOffRows, error: timeOffError },
+    ] = await Promise.all([
+      supabase
+        .from("shifts")
+        .select("*")
+        .gte("shift_date", from)
+        .lte("shift_date", to)
+        .order("start_time", { ascending: true }),
+      supabase.from("profiles").select("*").order("full_name", { ascending: true }),
+      supabase.from("time_off").select("*").lte("start_date", to).gte("end_date", from),
+    ]);
 
     if (shiftError) console.error(shiftError);
     if (profileError) console.error(profileError);
+    if (timeOffError) console.error(timeOffError);
 
     setShifts(shiftRows ?? []);
     setProfiles(profileRows ?? []);
+    setTimeOff(timeOffRows ?? []);
     setLoading(false);
   }, [rangeStart]);
 
@@ -144,6 +198,10 @@ export default function ShiftsPage() {
     setDialogOpen(true);
   }
 
+  function scrollToNow() {
+    document.getElementById("now-row")?.scrollIntoView({ behavior: "auto", block: "center" });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -165,6 +223,16 @@ export default function ShiftsPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-4">
+        <Button variant="outline" size="sm" onClick={scrollToNow}>
+          עכשיו!
+        </Button>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <Switch checked={extended} onCheckedChange={setExtended} />
+          תצוגה מורחבת
+        </label>
+      </div>
+
       {loading ? (
         <p className="text-sm text-muted-foreground">טוען…</p>
       ) : columns.length === 0 ? (
@@ -173,48 +241,104 @@ export default function ShiftsPage() {
         </div>
       ) : (
         <div className="max-h-[75vh] overflow-auto rounded-md border border-border/60 glow-border">
-          <table className="w-full border-collapse text-sm">
-            <thead className="sticky top-0 z-20 bg-card">
-              <tr>
-                <th className="sticky start-0 z-30 w-28 min-w-28 border-b border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
-                  תאריך
-                </th>
-                <th className="sticky start-28 z-30 min-w-20 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
-                  שעה
-                </th>
-                {columns.map((col) => (
-                  <th
-                    key={col}
-                    className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
-                  >
-                    {col}
+          <div className="flex items-start">
+            <table className="shrink-0 border-collapse text-sm">
+              <thead className="sticky top-0 z-20 bg-card">
+                <tr>
+                  <th className="sticky start-0 z-30 w-28 min-w-28 border-b border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
+                    תאריך
                   </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {days.map((day) => {
-                const iso = toISODate(day);
-                const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], columns);
-                return (
-                  <FragmentDay
-                    key={iso}
-                    iso={iso}
-                    day={day}
-                    dayGrid={dayGrid}
-                    columns={columns}
-                    isToday={iso === todayIso}
-                    currentHour={currentHour}
-                    profileById={profileById}
-                    userId={userId}
-                    onCellClick={(hour, col, shift) =>
-                      shift ? openEditShift(shift) : openNewShift(day, hour, col)
-                    }
-                  />
-                );
-              })}
-            </tbody>
-          </table>
+                  <th className="sticky start-28 z-30 min-w-20 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
+                    שעה
+                  </th>
+                  {columns.map((col) => (
+                    <th
+                      key={col}
+                      className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
+                    >
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {days.map((day) => {
+                  const iso = toISODate(day);
+                  const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], columns);
+                  return (
+                    <FragmentDay
+                      key={iso}
+                      iso={iso}
+                      day={day}
+                      dayGrid={dayGrid}
+                      columns={columns}
+                      isToday={iso === todayIso}
+                      currentHour={currentHour}
+                      profileById={profileById}
+                      userId={userId}
+                      onCellClick={(hour, col, shift) =>
+                        shift ? openEditShift(shift) : openNewShift(day, hour, col)
+                      }
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {extended && profiles.length > 0 && (
+              <table className="shrink-0 border-collapse text-sm">
+                <thead className="sticky top-0 z-20 bg-card">
+                  <tr>
+                    {profiles.map((p) => {
+                      const color = personColor(p.id, p.color);
+                      return (
+                        <th
+                          key={p.id}
+                          className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center text-xs font-medium tracking-wide uppercase glow-text"
+                          style={{ color: color?.hex }}
+                        >
+                          {p.full_name || "?"}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {days.map((day) => {
+                    const iso = toISODate(day);
+                    const personGrid = buildPersonHourGrid(
+                      shiftsByDay.get(iso) ?? [],
+                      profiles.map((p) => p.id)
+                    );
+                    return personGrid.map((row, hour) => (
+                      <tr key={`${iso}-people-${hour}`}>
+                        {profiles.map((p) => {
+                          const onShift = row[p.id];
+                          const offToday = !onShift && isOnTimeOff(p.id, iso);
+                          const color = personColor(p.id, p.color);
+                          return (
+                            <td
+                              key={p.id}
+                              className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono text-xs"
+                              style={{
+                                backgroundColor: onShift
+                                  ? `${color?.hex}55`
+                                  : offToday
+                                    ? TIME_OFF_COLOR
+                                    : undefined,
+                              }}
+                            >
+                              {" "}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ));
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
 
@@ -261,7 +385,7 @@ function FragmentDay({
       {dayGrid.map((row, hour) => {
         const isNowRow = isToday && hour === currentHour;
         return (
-          <tr key={`${iso}-${hour}`}>
+          <tr key={`${iso}-${hour}`} id={isNowRow ? "now-row" : undefined}>
             {hour === 0 && (
               <td
                 rowSpan={24}
