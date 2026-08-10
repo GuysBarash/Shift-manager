@@ -2,14 +2,22 @@
 // id (stable across reloads with no setup needed), but a person can override
 // it with an explicit pick from the same palette (see Profile.color).
 export const PALETTE = [
-  { name: "green", hex: "#4ade80", ring: "oklch(0.8 0.19 150)" },
-  { name: "cyan", hex: "#22d3ee", ring: "oklch(0.78 0.14 200)" },
-  { name: "amber", hex: "#fbbf24", ring: "oklch(0.8 0.16 85)" },
-  { name: "magenta", hex: "#f472b6", ring: "oklch(0.72 0.19 340)" },
-  { name: "violet", hex: "#a78bfa", ring: "oklch(0.72 0.19 290)" },
-  { name: "orange", hex: "#fb923c", ring: "oklch(0.75 0.18 45)" },
-  { name: "sky", hex: "#38bdf8", ring: "oklch(0.78 0.13 230)" },
-  { name: "lime", hex: "#a3e635", ring: "oklch(0.85 0.19 125)" },
+  { name: "red", hex: "#f87171" },
+  { name: "orange", hex: "#fb923c" },
+  { name: "amber", hex: "#fbbf24" },
+  { name: "yellow", hex: "#fde047" },
+  { name: "lime", hex: "#a3e635" },
+  { name: "green", hex: "#4ade80" },
+  { name: "emerald", hex: "#34d399" },
+  { name: "teal", hex: "#2dd4bf" },
+  { name: "cyan", hex: "#22d3ee" },
+  { name: "sky", hex: "#38bdf8" },
+  { name: "blue", hex: "#60a5fa" },
+  { name: "indigo", hex: "#818cf8" },
+  { name: "violet", hex: "#a78bfa" },
+  { name: "fuchsia", hex: "#e879f9" },
+  { name: "magenta", hex: "#f472b6" },
+  { name: "rose", hex: "#fb7185" },
 ];
 
 function hashString(value: string): number {
