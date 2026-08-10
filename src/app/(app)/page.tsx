@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import {
   addDays,
   formatDDMMYYYY,
   formatDow,
+  formatDowShort,
   formatHourLabel,
   startOfDay,
   toISODate,
@@ -14,9 +16,8 @@ import { personColor } from "@/lib/person-color";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ShiftDialog } from "@/components/shift-dialog";
 import { ActivityPanel } from "@/components/activity-panel";
-import { Plus } from "lucide-react";
+import { Eraser } from "lucide-react";
 
 const RANGE_DAYS = 7;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
@@ -76,6 +77,8 @@ function buildPersonHourGrid(dayShifts: Shift[], personIds: string[]): Record<st
   return rows;
 }
 
+type Brush = "erase" | string | null;
+
 export default function ShiftsPage() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -84,12 +87,9 @@ export default function ShiftsPage() {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => new Date());
   const [extended, setExtended] = useState(false);
-
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingShift, setEditingShift] = useState<Shift | null>(null);
-  const [newShiftDate, setNewShiftDate] = useState(new Date());
-  const [newShiftStartTime, setNewShiftStartTime] = useState("09:00");
-  const [newShiftPosition, setNewShiftPosition] = useState("");
+  const [brush, setBrush] = useState<Brush>(null);
+  const isPaintingRef = useRef(false);
+  const pendingPaintsRef = useRef<PromiseLike<void>[]>([]);
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const days = useMemo(
@@ -168,6 +168,25 @@ export default function ShiftsPage() {
     setLoading(false);
   }, [rangeStart]);
 
+  // Silent re-fetch of just the shifts (used to reconcile after a paint stroke,
+  // without flashing the full-page loading state).
+  const syncShifts = useCallback(async () => {
+    const supabase = createClient();
+    const from = toISODate(rangeStart);
+    const to = toISODate(addDays(rangeStart, RANGE_DAYS - 1));
+    const { data, error } = await supabase
+      .from("shifts")
+      .select("*")
+      .gte("shift_date", from)
+      .lte("shift_date", to)
+      .order("start_time", { ascending: true });
+    if (error) {
+      console.error(error);
+      return;
+    }
+    setShifts(data ?? []);
+  }, [rangeStart]);
+
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
@@ -182,24 +201,151 @@ export default function ShiftsPage() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    function handleMouseUp() {
+      if (isPaintingRef.current) {
+        isPaintingRef.current = false;
+        // Wait for every in-flight paint request to settle before reconciling —
+        // syncing too early can clobber an optimistic row before its insert
+        // response comes back and replaces the temp id with the real one.
+        Promise.all(pendingPaintsRef.current).then(() => syncShifts());
+        pendingPaintsRef.current = [];
+      }
+    }
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => window.removeEventListener("mouseup", handleMouseUp);
+  }, [syncShifts]);
+
   const todayIso = toISODate(now);
   const currentHour = now.getHours();
 
-  function openNewShift(date: Date, hour: number, position: string) {
-    setEditingShift(null);
-    setNewShiftDate(date);
-    setNewShiftStartTime(`${String(hour).padStart(2, "0")}:00`);
-    setNewShiftPosition(position);
-    setDialogOpen(true);
-  }
-
-  function openEditShift(shift: Shift) {
-    setEditingShift(shift);
-    setDialogOpen(true);
+  function scrollToRow(dateIso: string, hour: number) {
+    document.getElementById(`row-${dateIso}-${hour}`)?.scrollIntoView({ behavior: "auto", block: "center" });
   }
 
   function scrollToNow() {
-    document.getElementById("now-row")?.scrollIntoView({ behavior: "auto", block: "center" });
+    scrollToRow(todayIso, currentHour);
+  }
+
+  function scrollToNextMine() {
+    if (!userId) return;
+    const nowKey = `${todayIso}T${String(currentHour).padStart(2, "0")}`;
+    let best: { date: string; hour: number; key: string } | null = null;
+    for (const s of shifts) {
+      if (s.assigned_to !== userId) continue;
+      const [h] = s.start_time.split(":").map(Number);
+      const key = `${s.shift_date}T${String(h).padStart(2, "0")}`;
+      if (key < nowKey) continue;
+      if (!best || key < best.key) best = { date: s.shift_date, hour: h, key };
+    }
+    if (!best) {
+      toast.info("אין לך משמרות קרובות בטווח המוצג.");
+      return;
+    }
+    scrollToRow(best.date, best.hour);
+  }
+
+  // Inserts a single hour-aligned (or shorter) piece, optimistically first.
+  async function createPiece(
+    shiftDate: string,
+    col: string,
+    start: string,
+    end: string,
+    assignedTo: string | null,
+    notes: string | null
+  ) {
+    if (!userId) return;
+    const supabase = createClient();
+    const tempId = `temp-${Math.random().toString(36).slice(2)}`;
+    const optimistic: Shift = {
+      id: tempId,
+      shift_date: shiftDate,
+      start_time: start,
+      end_time: end,
+      position: col,
+      assigned_to: assignedTo,
+      notes,
+      created_by: userId,
+      updated_at: new Date().toISOString(),
+    };
+    setShifts((prev) => [...prev, optimistic]);
+    const { data, error } = await supabase
+      .from("shifts")
+      .insert({
+        shift_date: shiftDate,
+        start_time: start,
+        end_time: end,
+        position: col,
+        assigned_to: assignedTo,
+        notes,
+        created_by: userId,
+      })
+      .select()
+      .single();
+    if (error || !data) {
+      toast.error(error?.message ?? "שגיאה.");
+      setShifts((prev) => prev.filter((s) => s.id !== tempId));
+      return;
+    }
+    setShifts((prev) => prev.map((s) => (s.id === tempId ? data : s)));
+  }
+
+  // Each hour cell is independent: painting/erasing one hour of a longer
+  // shift splits it, leaving the untouched hours as separate rows instead of
+  // affecting the whole block.
+  function paintCell(day: Date, hour: number, col: string, existingShift: Shift | null) {
+    if (!brush || !userId) return;
+    const supabase = createClient();
+    const shiftDate = toISODate(day);
+    const hourStart = `${String(hour).padStart(2, "0")}:00:00`;
+    const hourEnd = hour === 23 ? "23:59:59" : `${String(hour + 1).padStart(2, "0")}:00:00`;
+
+    if (!existingShift) {
+      if (brush === "erase") return;
+      pendingPaintsRef.current.push(createPiece(shiftDate, col, hourStart, hourEnd, brush, null));
+      return;
+    }
+
+    if (brush !== "erase" && existingShift.assigned_to === brush) return;
+
+    const hasBefore = existingShift.start_time < hourStart;
+    const hasAfter = hourEnd < existingShift.end_time;
+
+    setShifts((prev) => prev.filter((s) => s.id !== existingShift.id));
+    const work: PromiseLike<void>[] = [
+      supabase
+        .from("shifts")
+        .delete()
+        .eq("id", existingShift.id)
+        .then(({ error }) => {
+          if (error) toast.error(error.message);
+        }),
+    ];
+    if (hasBefore) {
+      work.push(
+        createPiece(shiftDate, col, existingShift.start_time, hourStart, existingShift.assigned_to, existingShift.notes)
+      );
+    }
+    if (hasAfter) {
+      work.push(
+        createPiece(shiftDate, col, hourEnd, existingShift.end_time, existingShift.assigned_to, existingShift.notes)
+      );
+    }
+    if (brush !== "erase") {
+      work.push(createPiece(shiftDate, col, hourStart, hourEnd, brush, null));
+    }
+    pendingPaintsRef.current.push(Promise.all(work).then(() => {}));
+  }
+
+  function handlePaintDown(day: Date, hour: number, col: string, shift: Shift | null) {
+    if (!brush) return;
+    isPaintingRef.current = true;
+    paintCell(day, hour, col, shift);
+  }
+
+  function handlePaintEnter(day: Date, hour: number, col: string, shift: Shift | null) {
+    if (!brush || !isPaintingRef.current) return;
+    paintCell(day, hour, col, shift);
   }
 
   return (
@@ -211,21 +357,15 @@ export default function ShiftsPage() {
             — החל מ{formatDow(rangeStart)} {formatDDMMYYYY(rangeStart)}
           </span>
         </h1>
-        <div className="flex items-center gap-2">
-          <ActivityPanel profiles={profiles} />
-          <Button
-            size="sm"
-            onClick={() => openNewShift(new Date(), currentHour, columns[0] ?? "")}
-          >
-            <Plus className="size-4" />
-            משמרת חדשה
-          </Button>
-        </div>
+        <ActivityPanel profiles={profiles} />
       </div>
 
       <div className="flex flex-wrap items-center gap-4">
         <Button variant="outline" size="sm" onClick={scrollToNow}>
           עכשיו!
+        </Button>
+        <Button variant="outline" size="sm" onClick={scrollToNextMine}>
+          מתי אני
         </Button>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
           <Switch checked={extended} onCheckedChange={setExtended} />
@@ -237,124 +377,167 @@ export default function ShiftsPage() {
         <p className="text-sm text-muted-foreground">טוען…</p>
       ) : columns.length === 0 ? (
         <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-          עדיין אין משמרות בלוח. לחצו על &quot;משמרת חדשה&quot; כדי להוסיף את הראשונה.
+          אין עדיין משמרות בלוח.
         </div>
       ) : (
-        <div className="max-h-[75vh] overflow-auto rounded-md border border-border/60 glow-border">
-          <div className="flex items-start">
-            <table className="shrink-0 border-collapse text-sm">
-              <thead className="sticky top-0 z-20 bg-card">
-                <tr>
-                  <th className="sticky start-0 z-30 w-28 min-w-28 border-b border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
-                    תאריך
-                  </th>
-                  <th className="sticky start-28 z-30 min-w-20 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-muted-foreground uppercase">
-                    שעה
-                  </th>
-                  {columns.map((col) => (
-                    <th
-                      key={col}
-                      className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {days.map((day) => {
-                  const iso = toISODate(day);
-                  const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], columns);
-                  return (
-                    <FragmentDay
-                      key={iso}
-                      iso={iso}
-                      day={day}
-                      dayGrid={dayGrid}
-                      columns={columns}
-                      isToday={iso === todayIso}
-                      currentHour={currentHour}
-                      profileById={profileById}
-                      userId={userId}
-                      onCellClick={(hour, col, shift) =>
-                        shift ? openEditShift(shift) : openNewShift(day, hour, col)
-                      }
-                    />
-                  );
-                })}
-              </tbody>
-            </table>
+        <div className="flex items-start gap-3">
+          <BrushToolbar profiles={profiles} brush={brush} onSelect={setBrush} />
 
-            {extended && profiles.length > 0 && (
-              <table className="shrink-0 border-collapse text-sm">
+          <div className="max-h-[75vh] overflow-auto rounded-md border border-border/60 glow-border">
+            <div className="flex items-start">
+              <table className="shrink-0 border-collapse text-sm select-none">
                 <thead className="sticky top-0 z-20 bg-card">
                   <tr>
-                    {profiles.map((p) => {
-                      const color = personColor(p.id, p.color);
-                      return (
-                        <th
-                          key={p.id}
-                          className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center text-xs font-medium tracking-wide uppercase glow-text"
-                          style={{ color: color?.hex }}
-                        >
-                          {p.full_name || "?"}
-                        </th>
-                      );
-                    })}
+                    <th className="sticky start-0 z-30 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      תאריך
+                    </th>
+                    <th className="sticky start-14 z-30 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                      שעה
+                    </th>
+                    {columns.map((col) => (
+                      <th
+                        key={col}
+                        className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
+                      >
+                        {col}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
                   {days.map((day) => {
                     const iso = toISODate(day);
-                    const personGrid = buildPersonHourGrid(
-                      shiftsByDay.get(iso) ?? [],
-                      profiles.map((p) => p.id)
+                    const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], columns);
+                    return (
+                      <FragmentDay
+                        key={iso}
+                        iso={iso}
+                        day={day}
+                        dayGrid={dayGrid}
+                        columns={columns}
+                        isToday={iso === todayIso}
+                        currentHour={currentHour}
+                        profileById={profileById}
+                        userId={userId}
+                        brushActive={!!brush}
+                        onPaintDown={(hour, col, shift) => handlePaintDown(day, hour, col, shift)}
+                        onPaintEnter={(hour, col, shift) => handlePaintEnter(day, hour, col, shift)}
+                      />
                     );
-                    return personGrid.map((row, hour) => (
-                      <tr key={`${iso}-people-${hour}`}>
-                        {profiles.map((p) => {
-                          const onShift = row[p.id];
-                          const offToday = !onShift && isOnTimeOff(p.id, iso);
-                          const color = personColor(p.id, p.color);
-                          return (
-                            <td
-                              key={p.id}
-                              className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono text-xs"
-                              style={{
-                                backgroundColor: onShift
-                                  ? `${color?.hex}55`
-                                  : offToday
-                                    ? TIME_OFF_COLOR
-                                    : undefined,
-                              }}
-                            >
-                              {" "}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ));
                   })}
                 </tbody>
               </table>
-            )}
+
+              {extended && profiles.length > 0 && (
+                <table className="shrink-0 border-collapse text-sm">
+                  <thead className="sticky top-0 z-20 bg-card">
+                    <tr>
+                      {profiles.map((p) => {
+                        const color = personColor(p.id, p.color);
+                        return (
+                          <th
+                            key={p.id}
+                            className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center text-xs font-medium tracking-wide uppercase glow-text"
+                            style={{ color: color?.hex }}
+                          >
+                            {p.full_name || "?"}
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {days.map((day) => {
+                      const iso = toISODate(day);
+                      const personGrid = buildPersonHourGrid(
+                        shiftsByDay.get(iso) ?? [],
+                        profiles.map((p) => p.id)
+                      );
+                      return personGrid.map((row, hour) => (
+                        <tr key={`${iso}-people-${hour}`}>
+                          {profiles.map((p) => {
+                            const onShift = row[p.id];
+                            const offToday = !onShift && isOnTimeOff(p.id, iso);
+                            const color = personColor(p.id, p.color);
+                            return (
+                              <td
+                                key={p.id}
+                                className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono text-xs"
+                                style={{
+                                  backgroundColor: onShift
+                                    ? `${color?.hex}55`
+                                    : offToday
+                                      ? TIME_OFF_COLOR
+                                      : undefined,
+                                }}
+                              >
+                                {" "}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ));
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {userId && (
-        <ShiftDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          shift={editingShift}
-          defaultDate={newShiftDate}
-          defaultStartTime={newShiftStartTime}
-          defaultPosition={newShiftPosition}
-          profiles={profiles}
-          currentUserId={userId}
-          onSaved={load}
-        />
-      )}
+function BrushToolbar({
+  profiles,
+  brush,
+  onSelect,
+}: {
+  profiles: Profile[];
+  brush: Brush;
+  onSelect: (b: Brush) => void;
+}) {
+  return (
+    <div className="sticky top-4 flex shrink-0 flex-col gap-1 self-start rounded-md border border-border/60 bg-card p-2">
+      <button
+        type="button"
+        onClick={() => onSelect(brush === "erase" ? null : "erase")}
+        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors ${
+          brush === "erase"
+            ? "bg-destructive/15 text-destructive ring-1 ring-destructive/60"
+            : "text-muted-foreground hover:bg-accent"
+        }`}
+      >
+        <Eraser className="size-4" />
+        מחיקה
+      </button>
+      <div className="my-1 h-px bg-border/60" />
+      {profiles.map((p) => {
+        const color = personColor(p.id, p.color);
+        const selected = brush === p.id;
+        return (
+          <button
+            type="button"
+            key={p.id}
+            onClick={() => onSelect(selected ? null : p.id)}
+            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors hover:bg-accent"
+            style={{
+              backgroundColor: selected && color ? `${color.hex}22` : undefined,
+              boxShadow: selected && color ? `0 0 0 1px ${color.hex}` : undefined,
+            }}
+          >
+            <span
+              className="size-3 shrink-0 rounded-full"
+              style={{
+                backgroundColor: color?.hex,
+                boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+              }}
+            />
+            <span style={{ color: color?.hex }}>{p.full_name || "?"}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -368,7 +551,9 @@ function FragmentDay({
   currentHour,
   profileById,
   userId,
-  onCellClick,
+  brushActive,
+  onPaintDown,
+  onPaintEnter,
 }: {
   iso: string;
   day: Date;
@@ -378,33 +563,35 @@ function FragmentDay({
   currentHour: number;
   profileById: Map<string, Profile>;
   userId: string | null;
-  onCellClick: (hour: number, col: string, shift: Shift | null) => void;
+  brushActive: boolean;
+  onPaintDown: (hour: number, col: string, shift: Shift | null) => void;
+  onPaintEnter: (hour: number, col: string, shift: Shift | null) => void;
 }) {
   return (
     <>
       {dayGrid.map((row, hour) => {
         const isNowRow = isToday && hour === currentHour;
         return (
-          <tr key={`${iso}-${hour}`} id={isNowRow ? "now-row" : undefined}>
+          <tr key={`${iso}-${hour}`} id={`row-${iso}-${hour}`}>
             {hour === 0 && (
               <td
                 rowSpan={24}
-                className={`sticky start-0 z-10 border-b border-e border-border/60 bg-secondary/40 px-3 py-1.5 align-top font-mono text-xs ${
+                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary/40 px-1 py-1.5 align-top font-mono leading-tight ${
                   isToday ? "text-primary glow-text" : "text-secondary-foreground"
                 }`}
               >
-                <div className="font-bold tracking-widest">{formatDow(day)}</div>
-                <div>{formatDDMMYYYY(day)}</div>
-                {isToday && <div className="mt-1 text-primary glow-text">· היום</div>}
+                <div className="text-xs font-bold">{formatDowShort(day)}</div>
+                <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
+                {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
               </td>
             )}
             <td
-              className={`sticky start-28 z-10 border-b border-border/60 bg-card px-3 py-1.5 font-mono text-xs ${
+              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight ${
                 isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
               }`}
             >
               {formatHourLabel(hour)}
-              {isNowRow && <span className="ms-1.5 animate-pulse">◄ עכשיו</span>}
+              {isNowRow && <div className="text-[9px] animate-pulse">◄ עכשיו</div>}
             </td>
             {columns.map((col) => {
               const shift = row[col];
@@ -415,10 +602,13 @@ function FragmentDay({
               return (
                 <td
                   key={col}
-                  onClick={() => onCellClick(hour, col, shift)}
-                  className={`cursor-pointer border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
-                    isNowRow && !shift ? "bg-primary/10" : ""
-                  } ${isMine ? "ring-1 ring-inset ring-primary/50" : ""}`}
+                  onMouseDown={() => onPaintDown(hour, col, shift)}
+                  onMouseEnter={() => onPaintEnter(hour, col, shift)}
+                  className={`border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
+                    brushActive ? "cursor-crosshair" : "cursor-default"
+                  } ${isNowRow && !shift ? "bg-primary/10" : ""} ${
+                    isMine ? "ring-1 ring-inset ring-primary/50" : ""
+                  }`}
                   style={
                     shift
                       ? {

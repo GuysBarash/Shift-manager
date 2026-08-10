@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { personColor } from "@/lib/person-color";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -15,6 +17,24 @@ const LINKS = [
 export function NavBar() {
   const pathname = usePathname();
   const router = useRouter();
+  const [whoAmI, setWhoAmI] = useState<{ id: string; name: string; color: string | null } | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (!data.user) return;
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, color")
+        .eq("id", data.user.id)
+        .single();
+      setWhoAmI({
+        id: data.user.id,
+        name: profile?.full_name || data.user.email || "",
+        color: profile?.color ?? null,
+      });
+    });
+  }, []);
 
   async function handleLogout() {
     const supabase = createClient();
@@ -22,6 +42,8 @@ export function NavBar() {
     router.push("/login");
     router.refresh();
   }
+
+  const color = whoAmI ? personColor(whoAmI.id, whoAmI.color) : null;
 
   return (
     <header className="border-b border-border/60 bg-card/40">
@@ -45,9 +67,21 @@ export function NavBar() {
             );
           })}
         </nav>
-        <Button variant="outline" size="sm" onClick={handleLogout}>
-          התנתקות
-        </Button>
+        <div className="flex items-center gap-3">
+          {whoAmI && (
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              מחובר כ
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
+              />
+              <span style={{ color: color?.hex }}>{whoAmI.name}</span>
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={handleLogout}>
+            התנתקות
+          </Button>
+        </div>
       </div>
     </header>
   );

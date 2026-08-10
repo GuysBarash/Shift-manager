@@ -18,9 +18,14 @@ export function addDays(date: Date, days: number): Date {
 // Hardcoded (not Intl-derived) so server and client always render identical
 // text — locale-dependent formatting caused a real hydration mismatch before.
 const HE_DOW = ["יום א׳", "יום ב׳", "יום ג׳", "יום ד׳", "יום ה׳", "יום ו׳", "שבת"];
+const HE_DOW_SHORT = ["א׳", "ב׳", "ג׳", "ד׳", "ה׳", "ו׳", "ש׳"];
 
 export function formatDow(date: Date): string {
   return HE_DOW[date.getDay()];
+}
+
+export function formatDowShort(date: Date): string {
+  return HE_DOW_SHORT[date.getDay()];
 }
 
 export function formatDDMMYYYY(date: Date): string {
