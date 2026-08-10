@@ -432,7 +432,7 @@ export default function ShiftsPage() {
                         return (
                           <th
                             key={p.id}
-                            className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center text-xs font-medium tracking-wide uppercase glow-text"
+                            className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
                             style={{ color: color?.hex }}
                           >
                             {p.full_name || "?"}
@@ -457,7 +457,7 @@ export default function ShiftsPage() {
                             return (
                               <td
                                 key={p.id}
-                                className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono text-xs"
+                                className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
                                 style={{
                                   backgroundColor: onShift
                                     ? `${color?.hex}55`
@@ -466,7 +466,7 @@ export default function ShiftsPage() {
                                       : undefined,
                                 }}
                               >
-                                {" "}
+                                {" "}
                               </td>
                             );
                           })}
@@ -581,12 +581,12 @@ function FragmentDay({
               </td>
             )}
             <td
-              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight ${
+              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
                 isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
               }`}
             >
               {formatHourLabel(hour)}
-              {isNowRow && <div className="text-[9px] animate-pulse">◄ עכשיו</div>}
+              {isNowRow && <span className="animate-pulse">◄</span>}
             </td>
             {columns.map((col) => {
               const shift = row[col];

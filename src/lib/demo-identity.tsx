@@ -57,25 +57,31 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const id = readCookie(COOKIE_NAME);
-    if (!id) {
-      setReady(true);
-      return;
-    }
     const supabase = createClient();
-    supabase
-      .from("profiles")
-      .select("id, full_name")
-      .eq("id", id)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (data) {
-          setIdentity({ userId: data.id, fullName: data.full_name || "" });
-        } else {
-          clearCookie(COOKIE_NAME);
-        }
+    // A real Supabase Auth session lingering from before demo mode would make
+    // every request go through as `authenticated` instead of `anon` — and
+    // `authenticated` was never granted INSERT on profiles, only `anon` was
+    // (see the demo-mode migration). Force it out so requests are always anon.
+    supabase.auth.signOut().finally(() => {
+      const id = readCookie(COOKIE_NAME);
+      if (!id) {
         setReady(true);
-      });
+        return;
+      }
+      supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("id", id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setIdentity({ userId: data.id, fullName: data.full_name || "" });
+          } else {
+            clearCookie(COOKIE_NAME);
+          }
+          setReady(true);
+        });
+    });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
