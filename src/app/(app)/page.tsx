@@ -92,6 +92,36 @@ export default function ShiftsPage() {
   const [brush, setBrush] = useState<Brush>(null);
   const isPaintingRef = useRef(false);
   const pendingPaintsRef = useRef<PromiseLike<void>[]>([]);
+  // Mirrors `shifts`, but mutated as plain synchronous JS instead of through
+  // React state — a setShifts *updater function* only actually runs when
+  // React flushes the batch, which is too late for a fast drag stroke
+  // (several mousedown/mouseenter events can fire before that flush, so an
+  // updater-based ref would still read stale data across all of them). This
+  // ref is always current the instant applyShifts returns.
+  const shiftsRef = useRef<Shift[]>([]);
+
+  function applyShifts(updater: (prev: Shift[]) => Shift[]) {
+    const next = updater(shiftsRef.current);
+    shiftsRef.current = next;
+    setShifts(next);
+  }
+
+  // A piece created moments ago (still on its optimistic temp id, insert
+  // in flight) can't be deleted by id yet — the server doesn't know that id.
+  // Maps temp id -> the real id once the insert resolves, so a delete that
+  // targets a still-inserting piece can wait for it instead of silently
+  // deleting nothing and orphaning the row.
+  const pendingInsertIdRef = useRef<Map<string, Promise<string>>>(new Map());
+
+  async function resolveRealId(id: string): Promise<string> {
+    const pending = pendingInsertIdRef.current.get(id);
+    if (!pending) return id;
+    try {
+      return await pending;
+    } catch {
+      return id;
+    }
+  }
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const days = useMemo(
@@ -168,7 +198,7 @@ export default function ShiftsPage() {
     if (profileError) console.error(profileError);
     if (timeOffError) console.error(timeOffError);
 
-    setShifts(shiftRows ?? []);
+    applyShifts(() => shiftRows ?? []);
     setProfiles(profileRows ?? []);
     setTimeOff(timeOffRows ?? []);
     setLoading(false);
@@ -190,7 +220,7 @@ export default function ShiftsPage() {
       console.error(error);
       return;
     }
-    setShifts(data ?? []);
+    applyShifts(() => data ?? []);
   }, [rangeStart]);
 
   useEffect(() => {
@@ -267,37 +297,65 @@ export default function ShiftsPage() {
       created_by: userId,
       updated_at: new Date().toISOString(),
     };
-    setShifts((prev) => [...prev, optimistic]);
-    const { data, error } = await supabase
-      .from("shifts")
-      .insert({
-        shift_date: shiftDate,
-        start_time: start,
-        end_time: end,
-        position: col,
-        assigned_to: assignedTo,
-        notes,
-        created_by: userId,
-      })
-      .select()
-      .single();
-    if (error || !data) {
-      toast.error(error?.message ?? "שגיאה.");
-      setShifts((prev) => prev.filter((s) => s.id !== tempId));
-      return;
+    applyShifts((prev) => [...prev, optimistic]);
+
+    const insertPromise = (async (): Promise<string> => {
+      const { data, error } = await supabase
+        .from("shifts")
+        .insert({
+          shift_date: shiftDate,
+          start_time: start,
+          end_time: end,
+          position: col,
+          assigned_to: assignedTo,
+          notes,
+          created_by: userId,
+        })
+        .select()
+        .single();
+      if (error || !data) {
+        toast.error(error?.message ?? "שגיאה.");
+        applyShifts((prev) => prev.filter((s) => s.id !== tempId));
+        throw error ?? new Error("insert failed");
+      }
+      applyShifts((prev) => prev.map((s) => (s.id === tempId ? data : s)));
+      return data.id;
+    })();
+
+    pendingInsertIdRef.current.set(tempId, insertPromise);
+    try {
+      await insertPromise;
+    } catch {
+      // already surfaced via toast above
+    } finally {
+      pendingInsertIdRef.current.delete(tempId);
     }
-    setShifts((prev) => prev.map((s) => (s.id === tempId ? data : s)));
   }
 
   // Each hour cell is independent: painting/erasing one hour of a longer
   // shift splits it, leaving the untouched hours as separate rows instead of
   // affecting the whole block.
-  function paintCell(day: Date, hour: number, col: string, existingShift: Shift | null) {
+  function paintCell(day: Date, hour: number, col: string) {
     if (!brush) return;
     const supabase = createClient();
     const shiftDate = toISODate(day);
     const hourStart = `${String(hour).padStart(2, "0")}:00:00`;
     const hourEnd = hour === 23 ? "23:59:59" : `${String(hour + 1).padStart(2, "0")}:00:00`;
+
+    // Always look up the current shift from shiftsRef (kept in sync
+    // synchronously by applyShifts), never from a render-time snapshot.
+    // During a fast drag stroke, several mouseenter events can fire before
+    // React re-renders — using a stale shift reference here would recompute
+    // "remainder" pieces against the original, un-split block and silently
+    // resurrect hours that were already erased earlier in the same stroke.
+    const existingShift =
+      shiftsRef.current.find(
+        (s) =>
+          s.shift_date === shiftDate &&
+          (s.position ?? "") === col &&
+          s.start_time < hourEnd &&
+          hourStart < s.end_time
+      ) ?? null;
 
     if (!existingShift) {
       if (brush === "erase") return;
@@ -310,15 +368,21 @@ export default function ShiftsPage() {
     const hasBefore = existingShift.start_time < hourStart;
     const hasAfter = hourEnd < existingShift.end_time;
 
-    setShifts((prev) => prev.filter((s) => s.id !== existingShift.id));
+    applyShifts((prev) => prev.filter((s) => s.id !== existingShift.id));
     const work: PromiseLike<void>[] = [
-      supabase
-        .from("shifts")
-        .delete()
-        .eq("id", existingShift.id)
-        .then(({ error }) => {
-          if (error) toast.error(error.message);
-        }),
+      // The piece being split might have been created moments ago in this
+      // same stroke and still be on its optimistic temp id — wait for its
+      // real id before deleting, or the delete matches nothing server-side
+      // and the row is orphaned (see resolveRealId).
+      resolveRealId(existingShift.id).then((realId) =>
+        supabase
+          .from("shifts")
+          .delete()
+          .eq("id", realId)
+          .then(({ error }) => {
+            if (error) toast.error(error.message);
+          })
+      ),
     ];
     if (hasBefore) {
       work.push(
@@ -336,15 +400,15 @@ export default function ShiftsPage() {
     pendingPaintsRef.current.push(Promise.all(work).then(() => {}));
   }
 
-  function handlePaintDown(day: Date, hour: number, col: string, shift: Shift | null) {
+  function handlePaintDown(day: Date, hour: number, col: string) {
     if (!brush) return;
     isPaintingRef.current = true;
-    paintCell(day, hour, col, shift);
+    paintCell(day, hour, col);
   }
 
-  function handlePaintEnter(day: Date, hour: number, col: string, shift: Shift | null) {
+  function handlePaintEnter(day: Date, hour: number, col: string) {
     if (!brush || !isPaintingRef.current) return;
-    paintCell(day, hour, col, shift);
+    paintCell(day, hour, col);
   }
 
   return (
@@ -419,8 +483,8 @@ export default function ShiftsPage() {
                         profileById={profileById}
                         userId={userId}
                         brushActive={!!brush}
-                        onPaintDown={(hour, col, shift) => handlePaintDown(day, hour, col, shift)}
-                        onPaintEnter={(hour, col, shift) => handlePaintEnter(day, hour, col, shift)}
+                        onPaintDown={(hour, col) => handlePaintDown(day, hour, col)}
+                        onPaintEnter={(hour, col) => handlePaintEnter(day, hour, col)}
                       />
                     );
                   })}
@@ -625,8 +689,8 @@ function FragmentDay({
   profileById: Map<string, Profile>;
   userId: string;
   brushActive: boolean;
-  onPaintDown: (hour: number, col: string, shift: Shift | null) => void;
-  onPaintEnter: (hour: number, col: string, shift: Shift | null) => void;
+  onPaintDown: (hour: number, col: string) => void;
+  onPaintEnter: (hour: number, col: string) => void;
 }) {
   return (
     <>
@@ -663,8 +727,8 @@ function FragmentDay({
               return (
                 <td
                   key={col}
-                  onMouseDown={() => onPaintDown(hour, col, shift)}
-                  onMouseEnter={() => onPaintEnter(hour, col, shift)}
+                  onMouseDown={() => onPaintDown(hour, col)}
+                  onMouseEnter={() => onPaintEnter(hour, col)}
                   className={`border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
                     brushActive ? "cursor-crosshair" : "cursor-default"
                   } ${isNowRow && !shift ? "bg-primary/10" : ""} ${
