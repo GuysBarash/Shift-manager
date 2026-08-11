@@ -105,6 +105,10 @@ export default function ShiftsPage() {
     return map;
   }, [profiles]);
 
+  // Only Sambatz can actually be assigned to shifts — the paint palette and
+  // the per-person extended table are scoped to them.
+  const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
+
   const columns = useMemo(() => {
     const set = new Set<string>();
     shifts.forEach((s) => {
@@ -376,7 +380,7 @@ export default function ShiftsPage() {
         </div>
       ) : (
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
-          <BrushToolbar profiles={profiles} brush={brush} onSelect={setBrush} />
+          <BrushToolbar profiles={sambatzProfiles} brush={brush} onSelect={setBrush} />
 
           <div className="max-h-[68vh] flex-1 overflow-auto rounded-md border border-border/60 glow-border md:max-h-[75vh]">
             <div className="flex items-start">
@@ -423,11 +427,11 @@ export default function ShiftsPage() {
                 </tbody>
               </table>
 
-              {extended && profiles.length > 0 && (
+              {extended && sambatzProfiles.length > 0 && (
                 <table className="shrink-0 border-collapse text-sm">
                   <thead className="sticky top-0 z-20 bg-card">
                     <tr>
-                      {profiles.map((p) => {
+                      {sambatzProfiles.map((p) => {
                         const color = personColor(p.id, p.color);
                         return (
                           <th
@@ -446,11 +450,11 @@ export default function ShiftsPage() {
                       const iso = toISODate(day);
                       const personGrid = buildPersonHourGrid(
                         shiftsByDay.get(iso) ?? [],
-                        profiles.map((p) => p.id)
+                        sambatzProfiles.map((p) => p.id)
                       );
                       return personGrid.map((row, hour) => (
                         <tr key={`${iso}-people-${hour}`}>
-                          {profiles.map((p) => {
+                          {sambatzProfiles.map((p) => {
                             const onShift = row[p.id];
                             const offToday = !onShift && isOnTimeOff(p.id, iso);
                             const color = personColor(p.id, p.color);
@@ -675,16 +679,14 @@ function FragmentDay({
                       : undefined
                   }
                 >
-                  {shift ? (
+                  {shift && assignee ? (
                     <span
                       className="font-medium"
                       style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
                     >
-                      {assignee?.full_name || "לא משויך"}
+                      {assignee.full_name}
                     </span>
-                  ) : (
-                    <span className="text-muted-foreground/40">·</span>
-                  )}
+                  ) : null}
                 </td>
               );
             })}

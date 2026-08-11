@@ -3,6 +3,8 @@ export type Profile = {
   full_name: string | null;
   phone: string | null;
   color: string | null;
+  sambatz: boolean;
+  is_admin: boolean;
   created_at: string;
 };
 

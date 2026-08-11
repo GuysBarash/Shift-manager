@@ -10,6 +10,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Check } from "lucide-react";
 
 export default function PeoplePage() {
@@ -63,6 +65,21 @@ export default function PeoplePage() {
     setEditingId(null);
     load();
   }
+
+  async function handleToggleSambatz(p: Profile) {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from("profiles")
+      .update({ sambatz: !p.sambatz })
+      .eq("id", p.id);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    load();
+  }
+
+  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
 
   // Colors already in use by someone else (auto-assigned or chosen) — not offered.
   const takenByOthers = new Set(
@@ -157,18 +174,28 @@ export default function PeoplePage() {
                       }}
                     />
                     <div>
-                      <div className="font-medium">
+                      <div className="flex flex-wrap items-center gap-2 font-medium">
                         {p.full_name || "ללא שם"}
-                        {isMe && <span className="ms-2 text-xs text-muted-foreground">(אני)</span>}
+                        {isMe && <span className="text-xs text-muted-foreground">(אני)</span>}
+                        {p.is_admin && <Badge variant="secondary">מנהל</Badge>}
+                        {p.sambatz && <Badge variant="outline">סמבצ</Badge>}
                       </div>
                       {p.phone && <div className="text-sm text-muted-foreground">{p.phone}</div>}
                     </div>
                   </div>
-                  {isMe && (
-                    <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
-                      עריכה
-                    </Button>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {isAdmin && (
+                      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                        סמבצ
+                        <Switch checked={p.sambatz} onCheckedChange={() => handleToggleSambatz(p)} />
+                      </label>
+                    )}
+                    {isMe && (
+                      <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
+                        עריכה
+                      </Button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

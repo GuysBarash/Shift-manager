@@ -9,6 +9,12 @@ Source of truth: the files in [`migrations/`](migrations). This file is a human-
 > migration's header comment for exact revert steps before a real launch, and also restore
 > `src/proxy.ts` (currently bypasses the auth redirect) and re-wire the pages that use
 > `useDemoIdentity()` back to `supabase.auth.getUser()`.
+>
+> On top of that, `20260101000004_named_roster_sambatz.sql` closes the roster: only the 26
+> people seeded there may log in (matched by exact name — `demo_profiles_insert_all` was
+> dropped, so no one else can self-register). Note the `sambatz`/`is_admin` **update** RLS is
+> still the wide-open demo policy — the People page hides the toggle from non-admins, but
+> nothing stops a raw API call from flipping it. Fine for a demo; tighten before a real launch.
 
 ## Entity overview
 
@@ -27,14 +33,16 @@ shifts ──< shift_audit.shift_id  (snapshotted before every update/delete)
 ## Tables
 
 ### `profiles`
-One row per person, auto-created when they're invited/sign in.
+One row per person. Currently a closed, hand-seeded roster of 26 (see warning above) rather than auto-created via login.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `uuid` | PK; normally FK → `auth.users(id)` cascading on delete — **temporarily dropped** for demo mode, see warning above |
-| `full_name` | `text` | nullable |
+| `full_name` | `text` | nullable; the closed-roster login matches on this exactly (case-insensitive) |
 | `phone` | `text` | nullable |
 | `color` | `text` | nullable, explicit palette pick (see `src/lib/person-color.ts`); `null` = auto-assigned via hash of `id` |
+| `sambatz` | `boolean` | not null, default `false`; only sambatz=true people can be assigned to shifts (the paint palette and extended table on the shifts page are scoped to them) — editable per-person on the People page, admin-only |
+| `is_admin` | `boolean` | not null, default `false`; gates the sambatz toggle on the People page. Seeded true only for גיא ברש |
 | `created_at` | `timestamptz` | default `now()` |
 
 ### `shifts`

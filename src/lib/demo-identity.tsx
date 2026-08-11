@@ -3,11 +3,14 @@
 // TEMPORARY DEMO-MODE IDENTITY — stands in for real Supabase Auth while the
 // app is being shown around, not deployed for real yet.
 //
-// A visitor types a name once; it's matched against existing profiles
-// (case-insensitive) or a new one is created, then remembered via a cookie
-// so they don't need to re-enter it. No password, no email, no real auth
-// session — see supabase/migrations/20260101000003_temporary_demo_open_access.sql
-// for the matching RLS changes and how to revert both when deploying for real.
+// A visitor types a name once; it's matched (case-insensitive) against the
+// closed roster of profiles seeded in
+// supabase/migrations/20260101000004_named_roster_sambatz.sql — anyone not
+// on that list is rejected, no new profile is ever created here. On a match
+// the identity is remembered via a cookie so they don't need to re-enter it.
+// No password, no email, no real auth session — see
+// supabase/migrations/20260101000003_temporary_demo_open_access.sql for the
+// RLS changes and how to revert everything when deploying for real.
 
 import { createContext, useContext, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -99,26 +102,15 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
       .limit(1)
       .maybeSingle();
 
-    if (existing) {
-      writeCookie(COOKIE_NAME, existing.id, COOKIE_DAYS);
-      setIdentity({ userId: existing.id, fullName: existing.full_name || trimmed });
-      setSubmitting(false);
-      return;
-    }
-
-    const { data: created, error: insertError } = await supabase
-      .from("profiles")
-      .insert({ id: crypto.randomUUID(), full_name: trimmed })
-      .select("id, full_name")
-      .single();
-
     setSubmitting(false);
-    if (insertError || !created) {
-      setError(insertError?.message ?? "שגיאה ביצירת המשתמש.");
+
+    if (!existing) {
+      setError("גישה נדחתה. השם לא ברשימת המורשים.");
       return;
     }
-    writeCookie(COOKIE_NAME, created.id, COOKIE_DAYS);
-    setIdentity({ userId: created.id, fullName: created.full_name || trimmed });
+
+    writeCookie(COOKIE_NAME, existing.id, COOKIE_DAYS);
+    setIdentity({ userId: existing.id, fullName: existing.full_name || trimmed });
   }
 
   function switchUser() {
