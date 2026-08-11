@@ -6,7 +6,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <DemoIdentityProvider>
       <div className="min-h-screen">
         <NavBar />
-        <main className="mx-auto max-w-6xl p-4">{children}</main>
+        <main className="mx-auto max-w-6xl p-2 sm:p-4">{children}</main>
       </div>
     </DemoIdentityProvider>
   );

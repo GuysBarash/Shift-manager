@@ -18,7 +18,7 @@ import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ActivityPanel } from "@/components/activity-panel";
-import { Eraser } from "lucide-react";
+import { ChevronDown, Eraser } from "lucide-react";
 
 const RANGE_DAYS = 7;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
@@ -344,18 +344,18 @@ export default function ShiftsPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2 sm:space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold tracking-wide glow-text">
+        <h1 className="text-base font-semibold tracking-wide glow-text sm:text-lg">
           לוח משמרות{" "}
-          <span className="text-muted-foreground">
+          <span className="hidden text-muted-foreground sm:inline">
             — החל מ{formatDow(rangeStart)} {formatDDMMYYYY(rangeStart)}
           </span>
         </h1>
         <ActivityPanel profiles={profiles} />
       </div>
 
-      <div className="flex flex-wrap items-center gap-4">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-4">
         <Button variant="outline" size="sm" onClick={scrollToNow}>
           עכשיו!
         </Button>
@@ -375,10 +375,10 @@ export default function ShiftsPage() {
           אין עדיין משמרות בלוח.
         </div>
       ) : (
-        <div className="flex items-start gap-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
           <BrushToolbar profiles={profiles} brush={brush} onSelect={setBrush} />
 
-          <div className="max-h-[75vh] overflow-auto rounded-md border border-border/60 glow-border">
+          <div className="max-h-[68vh] flex-1 overflow-auto rounded-md border border-border/60 glow-border md:max-h-[75vh]">
             <div className="flex items-start">
               <table className="shrink-0 border-collapse text-sm select-none">
                 <thead className="sticky top-0 z-20 bg-card">
@@ -493,8 +493,13 @@ function BrushToolbar({
   brush: Brush;
   onSelect: (b: Brush) => void;
 }) {
-  return (
-    <div className="sticky top-4 flex shrink-0 flex-col gap-1 self-start rounded-md border border-border/60 bg-card p-2">
+  const [open, setOpen] = useState(false);
+
+  const selectedProfile = brush && brush !== "erase" ? (profiles.find((p) => p.id === brush) ?? null) : null;
+  const selectedColor = selectedProfile ? personColor(selectedProfile.id, selectedProfile.color) : null;
+
+  function EraseButton() {
+    return (
       <button
         type="button"
         onClick={() => onSelect(brush === "erase" ? null : "erase")}
@@ -507,33 +512,90 @@ function BrushToolbar({
         <Eraser className="size-4" />
         מחיקה
       </button>
-      <div className="my-1 h-px bg-border/60" />
-      {profiles.map((p) => {
-        const color = personColor(p.id, p.color);
-        const selected = brush === p.id;
-        return (
-          <button
-            type="button"
-            key={p.id}
-            onClick={() => onSelect(selected ? null : p.id)}
-            className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors hover:bg-accent"
-            style={{
-              backgroundColor: selected && color ? `${color.hex}22` : undefined,
-              boxShadow: selected && color ? `0 0 0 1px ${color.hex}` : undefined,
-            }}
-          >
-            <span
-              className="size-3 shrink-0 rounded-full"
+    );
+  }
+
+  function PersonButtons() {
+    return (
+      <>
+        {profiles.map((p) => {
+          const color = personColor(p.id, p.color);
+          const selected = brush === p.id;
+          return (
+            <button
+              type="button"
+              key={p.id}
+              onClick={() => onSelect(selected ? null : p.id)}
+              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors hover:bg-accent"
               style={{
-                backgroundColor: color?.hex,
-                boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                backgroundColor: selected && color ? `${color.hex}22` : undefined,
+                boxShadow: selected && color ? `0 0 0 1px ${color.hex}` : undefined,
               }}
-            />
-            <span style={{ color: color?.hex }}>{p.full_name || "?"}</span>
-          </button>
-        );
-      })}
-    </div>
+            >
+              <span
+                className="size-3 shrink-0 rounded-full"
+                style={{
+                  backgroundColor: color?.hex,
+                  boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                }}
+              />
+              <span style={{ color: color?.hex }}>{p.full_name || "?"}</span>
+            </button>
+          );
+        })}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {/* Mobile: frozen, collapsible bar above the table */}
+      <div className="sticky top-0 z-40 rounded-md border border-border/60 bg-card shadow-sm md:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center justify-between gap-2 px-3 py-2"
+        >
+          <span className="flex items-center gap-2 text-xs">
+            {brush === "erase" ? (
+              <>
+                <Eraser className="size-3.5 text-destructive" />
+                <span className="text-destructive">מחיקה</span>
+              </>
+            ) : selectedProfile ? (
+              <>
+                <span
+                  className="size-3 shrink-0 rounded-full"
+                  style={{
+                    backgroundColor: selectedColor?.hex,
+                    boxShadow: selectedColor ? `0 0 6px ${selectedColor.hex}` : undefined,
+                  }}
+                />
+                <span style={{ color: selectedColor?.hex }}>{selectedProfile.full_name || "?"}</span>
+              </>
+            ) : (
+              <span className="text-muted-foreground">מברשת: בחר צבע</span>
+            )}
+          </span>
+          <ChevronDown
+            className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+        {open && (
+          <div className="flex flex-wrap gap-1 border-t border-border/60 p-2">
+            <EraseButton />
+            <PersonButtons />
+          </div>
+        )}
+      </div>
+
+      {/* Desktop: vertical sidebar next to the table */}
+      <div className="sticky top-4 hidden shrink-0 flex-col gap-1 self-start rounded-md border border-border/60 bg-card p-2 md:flex">
+        <EraseButton />
+        <div className="my-1 h-px bg-border/60" />
+        <PersonButtons />
+      </div>
+    </>
   );
 }
 
