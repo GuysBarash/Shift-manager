@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useDemoIdentity } from "@/lib/demo-identity";
-import { PALETTE, personColor } from "@/lib/person-color";
+import { PALETTE, buildColorAssignments } from "@/lib/person-color";
 import type { Profile } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ export default function PeoplePage() {
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
+  const [selectedSambatz, setSelectedSambatz] = useState(false);
   const [saving, setSaving] = useState(false);
 
   async function load() {
@@ -31,6 +32,7 @@ export default function PeoplePage() {
     const { data: profileRows, error } = await supabase
       .from("profiles")
       .select("*")
+      .order("sambatz", { ascending: false })
       .order("full_name", { ascending: true });
     if (error) console.error(error);
     setProfiles(profileRows ?? []);
@@ -41,21 +43,23 @@ export default function PeoplePage() {
     load();
   }, []);
 
+  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
+
   function startEdit(p: Profile) {
     setEditingId(p.id);
     setFullName(p.full_name ?? "");
     setPhone(p.phone ?? "");
     setSelectedColor(p.color);
+    setSelectedSambatz(p.sambatz);
   }
 
   async function handleSave() {
     if (!editingId) return;
     setSaving(true);
     const supabase = createClient();
-    const { error } = await supabase
-      .from("profiles")
-      .update({ full_name: fullName, phone, color: selectedColor })
-      .eq("id", editingId);
+    const update: Partial<Profile> = { full_name: fullName, phone, color: selectedColor };
+    if (isAdmin) update.sambatz = selectedSambatz;
+    const { error } = await supabase.from("profiles").update(update).eq("id", editingId);
     setSaving(false);
     if (error) {
       toast.error(error.message);
@@ -66,26 +70,13 @@ export default function PeoplePage() {
     load();
   }
 
-  async function handleToggleSambatz(p: Profile) {
-    const supabase = createClient();
-    const { error } = await supabase
-      .from("profiles")
-      .update({ sambatz: !p.sambatz })
-      .eq("id", p.id);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    load();
-  }
-
-  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
+  const colorAssignments = buildColorAssignments(profiles);
 
   // Colors already in use by someone else (auto-assigned or chosen) — not offered.
   const takenByOthers = new Set(
     profiles
       .filter((p) => p.id !== editingId)
-      .map((p) => personColor(p.id, p.color)?.name)
+      .map((p) => colorAssignments.get(p.id)?.name)
   );
 
   return (
@@ -99,8 +90,9 @@ export default function PeoplePage() {
           <p className="text-sm text-muted-foreground">עדיין אין כאן אף אחד.</p>
         )}
         {profiles.map((p) => {
-          const color = personColor(p.id, p.color);
+          const color = colorAssignments.get(p.id);
           const isMe = p.id === userId;
+          const canEdit = isMe || isAdmin;
           const isEditing = editingId === p.id;
           return (
             <div key={p.id} className="rounded-md border border-border/60 p-3">
@@ -154,6 +146,12 @@ export default function PeoplePage() {
                       })}
                     </div>
                   </div>
+                  {isAdmin && (
+                    <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                      <Switch checked={selectedSambatz} onCheckedChange={setSelectedSambatz} />
+                      סמבצ
+                    </label>
+                  )}
                   <div className="flex gap-2">
                     <Button size="sm" onClick={handleSave} disabled={saving}>
                       {saving ? "שומר..." : "שמירה"}
@@ -183,19 +181,11 @@ export default function PeoplePage() {
                       {p.phone && <div className="text-sm text-muted-foreground">{p.phone}</div>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {isAdmin && (
-                      <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                        סמבצ
-                        <Switch checked={p.sambatz} onCheckedChange={() => handleToggleSambatz(p)} />
-                      </label>
-                    )}
-                    {isMe && (
-                      <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
-                        עריכה
-                      </Button>
-                    )}
-                  </div>
+                  {canEdit && (
+                    <Button size="sm" variant="ghost" onClick={() => startEdit(p)}>
+                      עריכה
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

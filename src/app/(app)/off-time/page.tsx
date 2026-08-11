@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { toISODate } from "@/lib/dates";
 import { useDemoIdentity } from "@/lib/demo-identity";
-import { personColor } from "@/lib/person-color";
+import { buildColorAssignments } from "@/lib/person-color";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +29,8 @@ export default function OffTimePage() {
     profiles.forEach((p) => map.set(p.id, p));
     return map;
   }, [profiles]);
+
+  const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -118,7 +120,7 @@ export default function OffTimePage() {
           )}
           {entries.map((entry) => {
             const person = profileById.get(entry.user_id);
-            const color = personColor(entry.user_id, person?.color);
+            const color = colorAssignments.get(entry.user_id);
             return (
               <div key={entry.id} className="flex items-center justify-between rounded-md border border-border/60 p-2 text-sm">
                 <div className="flex items-center gap-2">

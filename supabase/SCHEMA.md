@@ -54,7 +54,7 @@ The core schedule. Self-service: any logged-in user can create/edit/delete any s
 | `shift_date` | `date` | not null |
 | `start_time` | `time` | not null |
 | `end_time` | `time` | not null |
-| `position` | `text` | nullable, e.g. "Cashier" |
+| `position` | `text` | nullable; the app only ever writes one of the two fixed values in `SHIFT_COLUMNS` (`src/app/(app)/page.tsx`) — a free column name isn't otherwise meaningful anymore |
 | `assigned_to` | `uuid` | nullable FK → `profiles.id`, `on delete set null` |
 | `notes` | `text` | nullable |
 | `created_by` | `uuid` | FK → `profiles.id` |

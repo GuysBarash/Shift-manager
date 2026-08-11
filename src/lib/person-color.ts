@@ -37,3 +37,37 @@ export function personColor(id: string | null | undefined, colorKey?: string | n
   const index = hashString(id) % PALETTE.length;
   return PALETTE[index];
 }
+
+type ColorablePerson = { id: string; color: string | null; sambatz: boolean; full_name: string | null };
+
+// Coordinated coloring across a group: Sambatz people (without an explicit
+// pick) are spread as evenly as possible around the palette's hue wheel so
+// they stay visually distinct from each other at a glance on the schedule;
+// everyone else just falls back to the plain per-id hash — fine for them
+// since they're not competing for attention in the same grid.
+export function buildColorAssignments(people: ColorablePerson[]): Map<string, { name: string; hex: string }> {
+  const map = new Map<string, { name: string; hex: string }>();
+
+  for (const p of people) {
+    if (p.color) {
+      const explicit = PALETTE.find((c) => c.name === p.color);
+      if (explicit) map.set(p.id, explicit);
+    }
+  }
+
+  const sambatzToAssign = people
+    .filter((p) => p.sambatz && !map.has(p.id))
+    .sort((a, b) => (a.full_name ?? "").localeCompare(b.full_name ?? ""));
+  sambatzToAssign.forEach((p, i) => {
+    const index = Math.floor((i * PALETTE.length) / sambatzToAssign.length) % PALETTE.length;
+    map.set(p.id, PALETTE[index]);
+  });
+
+  for (const p of people) {
+    if (!map.has(p.id)) {
+      map.set(p.id, PALETTE[hashString(p.id) % PALETTE.length]);
+    }
+  }
+
+  return map;
+}

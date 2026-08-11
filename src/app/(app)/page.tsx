@@ -12,7 +12,7 @@ import {
   startOfDay,
   toISODate,
 } from "@/lib/dates";
-import { personColor } from "@/lib/person-color";
+import { buildColorAssignments } from "@/lib/person-color";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,10 @@ import { ChevronDown, Eraser } from "lucide-react";
 
 const RANGE_DAYS = 7;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
+// Two fixed slots per hour rather than positions derived from existing
+// shifts — that made an empty board a dead end (no columns meant nowhere to
+// paint a first shift).
+const SHIFT_COLUMNS = ["משמרת א׳", "משמרת ב׳"];
 
 function buildDayGrid(dayShifts: Shift[], columns: string[]): Record<string, Shift | null>[] {
   const hourOwner: Record<string, (Shift | null)[]> = {};
@@ -139,13 +143,7 @@ export default function ShiftsPage() {
   // the per-person extended table are scoped to them.
   const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
 
-  const columns = useMemo(() => {
-    const set = new Set<string>();
-    shifts.forEach((s) => {
-      if (s.position) set.add(s.position);
-    });
-    return [...set].sort();
-  }, [shifts]);
+  const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
   const shiftsByDay = useMemo(() => {
     const map = new Map<string, Shift[]>();
@@ -438,13 +436,9 @@ export default function ShiftsPage() {
 
       {loading ? (
         <p className="text-sm text-muted-foreground">טוען…</p>
-      ) : columns.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-          אין עדיין משמרות בלוח.
-        </div>
       ) : (
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
-          <BrushToolbar profiles={sambatzProfiles} brush={brush} onSelect={setBrush} />
+          <BrushToolbar profiles={sambatzProfiles} colorAssignments={colorAssignments} brush={brush} onSelect={setBrush} />
 
           <div className="max-h-[68vh] flex-1 overflow-auto rounded-md border border-border/60 glow-border md:max-h-[75vh]">
             <div className="flex items-start">
@@ -457,7 +451,7 @@ export default function ShiftsPage() {
                     <th className="sticky start-14 z-30 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                       שעה
                     </th>
-                    {columns.map((col) => (
+                    {SHIFT_COLUMNS.map((col) => (
                       <th
                         key={col}
                         className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
@@ -470,17 +464,18 @@ export default function ShiftsPage() {
                 <tbody>
                   {days.map((day) => {
                     const iso = toISODate(day);
-                    const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], columns);
+                    const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], SHIFT_COLUMNS);
                     return (
                       <FragmentDay
                         key={iso}
                         iso={iso}
                         day={day}
                         dayGrid={dayGrid}
-                        columns={columns}
+                        columns={SHIFT_COLUMNS}
                         isToday={iso === todayIso}
                         currentHour={currentHour}
                         profileById={profileById}
+                        colorAssignments={colorAssignments}
                         userId={userId}
                         brushActive={!!brush}
                         onPaintDown={(hour, col) => handlePaintDown(day, hour, col)}
@@ -496,7 +491,7 @@ export default function ShiftsPage() {
                   <thead className="sticky top-0 z-20 bg-card">
                     <tr>
                       {sambatzProfiles.map((p) => {
-                        const color = personColor(p.id, p.color);
+                        const color = colorAssignments.get(p.id);
                         return (
                           <th
                             key={p.id}
@@ -521,7 +516,7 @@ export default function ShiftsPage() {
                           {sambatzProfiles.map((p) => {
                             const onShift = row[p.id];
                             const offToday = !onShift && isOnTimeOff(p.id, iso);
-                            const color = personColor(p.id, p.color);
+                            const color = colorAssignments.get(p.id);
                             return (
                               <td
                                 key={p.id}
@@ -554,17 +549,19 @@ export default function ShiftsPage() {
 
 function BrushToolbar({
   profiles,
+  colorAssignments,
   brush,
   onSelect,
 }: {
   profiles: Profile[];
+  colorAssignments: Map<string, { name: string; hex: string }>;
   brush: Brush;
   onSelect: (b: Brush) => void;
 }) {
   const [open, setOpen] = useState(false);
 
   const selectedProfile = brush && brush !== "erase" ? (profiles.find((p) => p.id === brush) ?? null) : null;
-  const selectedColor = selectedProfile ? personColor(selectedProfile.id, selectedProfile.color) : null;
+  const selectedColor = selectedProfile ? colorAssignments.get(selectedProfile.id) : null;
 
   function EraseButton() {
     return (
@@ -587,7 +584,7 @@ function BrushToolbar({
     return (
       <>
         {profiles.map((p) => {
-          const color = personColor(p.id, p.color);
+          const color = colorAssignments.get(p.id);
           const selected = brush === p.id;
           return (
             <button
@@ -675,6 +672,7 @@ function FragmentDay({
   isToday,
   currentHour,
   profileById,
+  colorAssignments,
   userId,
   brushActive,
   onPaintDown,
@@ -687,6 +685,7 @@ function FragmentDay({
   isToday: boolean;
   currentHour: number;
   profileById: Map<string, Profile>;
+  colorAssignments: Map<string, { name: string; hex: string }>;
   userId: string;
   brushActive: boolean;
   onPaintDown: (hour: number, col: string) => void;
@@ -721,7 +720,7 @@ function FragmentDay({
             {columns.map((col) => {
               const shift = row[col];
               const assignee = shift?.assigned_to ? profileById.get(shift.assigned_to) : null;
-              const color = shift?.assigned_to ? personColor(shift.assigned_to, assignee?.color) : null;
+              const color = shift?.assigned_to ? colorAssignments.get(shift.assigned_to) : null;
               const isMine = shift?.assigned_to === userId;
 
               return (
