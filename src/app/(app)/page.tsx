@@ -95,8 +95,9 @@ export default function ShiftsPage() {
   const [now, setNow] = useState(() => new Date());
   const [extended, setExtended] = useState(false);
   const [brush, setBrush] = useState<Brush>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [savingEdits, setSavingEdits] = useState(false);
   const isPaintingRef = useRef(false);
-  const pendingPaintsRef = useRef<PromiseLike<void>[]>([]);
   // Mirrors `shifts`, but mutated as plain synchronous JS instead of through
   // React state — a setShifts *updater function* only actually runs when
   // React flushes the batch, which is too late for a fast drag stroke
@@ -104,28 +105,16 @@ export default function ShiftsPage() {
   // updater-based ref would still read stale data across all of them). This
   // ref is always current the instant applyShifts returns.
   const shiftsRef = useRef<Shift[]>([]);
+  // Snapshot taken the moment edit mode is entered, restored verbatim on
+  // discard. Every paint/erase during edit mode only ever touches local
+  // state (see paintCell) — nothing reaches the DB until Save, so this one
+  // snapshot is the entire undo story.
+  const editSnapshotRef = useRef<Shift[] | null>(null);
 
   function applyShifts(updater: (prev: Shift[]) => Shift[]) {
     const next = updater(shiftsRef.current);
     shiftsRef.current = next;
     setShifts(next);
-  }
-
-  // A piece created moments ago (still on its optimistic temp id, insert
-  // in flight) can't be deleted by id yet — the server doesn't know that id.
-  // Maps temp id -> the real id once the insert resolves, so a delete that
-  // targets a still-inserting piece can wait for it instead of silently
-  // deleting nothing and orphaning the row.
-  const pendingInsertIdRef = useRef<Map<string, Promise<string>>>(new Map());
-
-  async function resolveRealId(id: string): Promise<string> {
-    const pending = pendingInsertIdRef.current.get(id);
-    if (!pending) return id;
-    try {
-      return await pending;
-    } catch {
-      return id;
-    }
   }
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
@@ -233,18 +222,11 @@ export default function ShiftsPage() {
 
   useEffect(() => {
     function handleMouseUp() {
-      if (isPaintingRef.current) {
-        isPaintingRef.current = false;
-        // Wait for every in-flight paint request to settle before reconciling —
-        // syncing too early can clobber an optimistic row before its insert
-        // response comes back and replaces the temp id with the real one.
-        Promise.all(pendingPaintsRef.current).then(() => syncShifts());
-        pendingPaintsRef.current = [];
-      }
+      isPaintingRef.current = false;
     }
     window.addEventListener("mouseup", handleMouseUp);
     return () => window.removeEventListener("mouseup", handleMouseUp);
-  }, [syncShifts]);
+  }, []);
 
   const todayIso = toISODate(now);
   const currentHour = now.getHours();
@@ -255,6 +237,72 @@ export default function ShiftsPage() {
 
   function scrollToNow() {
     scrollToRow(todayIso, currentHour);
+  }
+
+  function enterEditMode() {
+    if (editMode) return;
+    editSnapshotRef.current = shiftsRef.current;
+    setEditMode(true);
+  }
+
+  function discardEdits() {
+    if (editSnapshotRef.current) {
+      applyShifts(() => editSnapshotRef.current!);
+    }
+    editSnapshotRef.current = null;
+    setEditMode(false);
+    setBrush(null);
+  }
+
+  async function saveEdits() {
+    if (!editSnapshotRef.current) {
+      setEditMode(false);
+      return;
+    }
+    setSavingEdits(true);
+    const supabase = createClient();
+
+    // Diff against the snapshot rather than replacing the whole visible
+    // range — only what actually changed during this edit session touches
+    // the DB, and unrelated rows (and their audit history) are untouched.
+    const originalIds = new Set(editSnapshotRef.current.map((s) => s.id));
+    const currentIds = new Set(shiftsRef.current.map((s) => s.id));
+    const toDeleteIds = [...originalIds].filter((id) => !currentIds.has(id));
+    const toInsert = shiftsRef.current.filter((s) => s.id.startsWith("temp-"));
+
+    if (toDeleteIds.length > 0) {
+      const { error } = await supabase.from("shifts").delete().in("id", toDeleteIds);
+      if (error) {
+        toast.error(error.message);
+        setSavingEdits(false);
+        return;
+      }
+    }
+    if (toInsert.length > 0) {
+      const { error } = await supabase.from("shifts").insert(
+        toInsert.map((s) => ({
+          shift_date: s.shift_date,
+          start_time: s.start_time,
+          end_time: s.end_time,
+          position: s.position,
+          assigned_to: s.assigned_to,
+          notes: s.notes,
+          created_by: userId,
+        }))
+      );
+      if (error) {
+        toast.error(error.message);
+        setSavingEdits(false);
+        return;
+      }
+    }
+
+    await syncShifts();
+    editSnapshotRef.current = null;
+    setEditMode(false);
+    setBrush(null);
+    setSavingEdits(false);
+    toast.success("השינויים נשמרו.");
   }
 
   function scrollToNextMine() {
@@ -274,8 +322,9 @@ export default function ShiftsPage() {
     scrollToRow(best.date, best.hour);
   }
 
-  // Inserts a single hour-aligned (or shorter) piece, optimistically first.
-  async function createPiece(
+  // Purely local — no network call. Edit mode batches every change into one
+  // Save, so nothing reaches the DB until then.
+  function createLocalPiece(
     shiftDate: string,
     col: string,
     start: string,
@@ -283,9 +332,8 @@ export default function ShiftsPage() {
     assignedTo: string | null,
     notes: string | null
   ) {
-    const supabase = createClient();
     const tempId = `temp-${Math.random().toString(36).slice(2)}`;
-    const optimistic: Shift = {
+    const piece: Shift = {
       id: tempId,
       shift_date: shiftDate,
       start_time: start,
@@ -296,57 +344,19 @@ export default function ShiftsPage() {
       created_by: userId,
       updated_at: new Date().toISOString(),
     };
-    applyShifts((prev) => [...prev, optimistic]);
-
-    const insertPromise = (async (): Promise<string> => {
-      const { data, error } = await supabase
-        .from("shifts")
-        .insert({
-          shift_date: shiftDate,
-          start_time: start,
-          end_time: end,
-          position: col,
-          assigned_to: assignedTo,
-          notes,
-          created_by: userId,
-        })
-        .select()
-        .single();
-      if (error || !data) {
-        toast.error(error?.message ?? "שגיאה.");
-        applyShifts((prev) => prev.filter((s) => s.id !== tempId));
-        throw error ?? new Error("insert failed");
-      }
-      applyShifts((prev) => prev.map((s) => (s.id === tempId ? data : s)));
-      return data.id;
-    })();
-
-    pendingInsertIdRef.current.set(tempId, insertPromise);
-    try {
-      await insertPromise;
-    } catch {
-      // already surfaced via toast above
-    } finally {
-      pendingInsertIdRef.current.delete(tempId);
-    }
+    applyShifts((prev) => [...prev, piece]);
   }
 
   // Each hour cell is independent: painting/erasing one hour of a longer
   // shift splits it, leaving the untouched hours as separate rows instead of
-  // affecting the whole block.
+  // affecting the whole block. Everything here is local-only (edit mode) —
+  // no async DB round-trips, so no race between rapid strokes is possible.
   function paintCell(day: Date, hour: number, col: string) {
     if (!brush) return;
-    const supabase = createClient();
     const shiftDate = toISODate(day);
     const hourStart = `${String(hour).padStart(2, "0")}:00:00`;
     const hourEnd = hour === 23 ? "23:59:59" : `${String(hour + 1).padStart(2, "0")}:00:00`;
 
-    // Always look up the current shift from shiftsRef (kept in sync
-    // synchronously by applyShifts), never from a render-time snapshot.
-    // During a fast drag stroke, several mouseenter events can fire before
-    // React re-renders — using a stale shift reference here would recompute
-    // "remainder" pieces against the original, un-split block and silently
-    // resurrect hours that were already erased earlier in the same stroke.
     const existingShift =
       shiftsRef.current.find(
         (s) =>
@@ -358,7 +368,7 @@ export default function ShiftsPage() {
 
     if (!existingShift) {
       if (brush === "erase") return;
-      pendingPaintsRef.current.push(createPiece(shiftDate, col, hourStart, hourEnd, brush, null));
+      createLocalPiece(shiftDate, col, hourStart, hourEnd, brush, null);
       return;
     }
 
@@ -368,45 +378,25 @@ export default function ShiftsPage() {
     const hasAfter = hourEnd < existingShift.end_time;
 
     applyShifts((prev) => prev.filter((s) => s.id !== existingShift.id));
-    const work: PromiseLike<void>[] = [
-      // The piece being split might have been created moments ago in this
-      // same stroke and still be on its optimistic temp id — wait for its
-      // real id before deleting, or the delete matches nothing server-side
-      // and the row is orphaned (see resolveRealId).
-      resolveRealId(existingShift.id).then((realId) =>
-        supabase
-          .from("shifts")
-          .delete()
-          .eq("id", realId)
-          .then(({ error }) => {
-            if (error) toast.error(error.message);
-          })
-      ),
-    ];
     if (hasBefore) {
-      work.push(
-        createPiece(shiftDate, col, existingShift.start_time, hourStart, existingShift.assigned_to, existingShift.notes)
-      );
+      createLocalPiece(shiftDate, col, existingShift.start_time, hourStart, existingShift.assigned_to, existingShift.notes);
     }
     if (hasAfter) {
-      work.push(
-        createPiece(shiftDate, col, hourEnd, existingShift.end_time, existingShift.assigned_to, existingShift.notes)
-      );
+      createLocalPiece(shiftDate, col, hourEnd, existingShift.end_time, existingShift.assigned_to, existingShift.notes);
     }
     if (brush !== "erase") {
-      work.push(createPiece(shiftDate, col, hourStart, hourEnd, brush, null));
+      createLocalPiece(shiftDate, col, hourStart, hourEnd, brush, null);
     }
-    pendingPaintsRef.current.push(Promise.all(work).then(() => {}));
   }
 
   function handlePaintDown(day: Date, hour: number, col: string) {
-    if (!brush) return;
+    if (!brush || !editMode) return;
     isPaintingRef.current = true;
     paintCell(day, hour, col);
   }
 
   function handlePaintEnter(day: Date, hour: number, col: string) {
-    if (!brush || !isPaintingRef.current) return;
+    if (!brush || !editMode || !isPaintingRef.current) return;
     paintCell(day, hour, col);
   }
 
@@ -439,7 +429,20 @@ export default function ShiftsPage() {
         <p className="text-sm text-muted-foreground">טוען…</p>
       ) : (
         <div className="flex flex-col gap-2 md:flex-row md:items-start md:gap-3">
-          <BrushToolbar profiles={sambatzProfiles} colorAssignments={colorAssignments} brush={brush} onSelect={setBrush} />
+          <BrushToolbar
+            profiles={sambatzProfiles}
+            colorAssignments={colorAssignments}
+            brush={brush}
+            onSelect={(b) => {
+              setBrush(b);
+              if (b) enterEditMode();
+            }}
+            editMode={editMode}
+            onToggleEditMode={(on) => (on ? enterEditMode() : discardEdits())}
+            onSave={saveEdits}
+            onDiscard={discardEdits}
+            saving={savingEdits}
+          />
 
           <div className="max-h-[68vh] flex-1 overflow-auto rounded-md border border-border/60 glow-border md:max-h-[75vh]">
             <div className="flex items-start">
@@ -563,11 +566,21 @@ function BrushToolbar({
   colorAssignments,
   brush,
   onSelect,
+  editMode,
+  onToggleEditMode,
+  onSave,
+  onDiscard,
+  saving,
 }: {
   profiles: Profile[];
   colorAssignments: Map<string, { name: string; hex: string }>;
   brush: Brush;
   onSelect: (b: Brush) => void;
+  editMode: boolean;
+  onToggleEditMode: (on: boolean) => void;
+  onSave: () => void;
+  onDiscard: () => void;
+  saving: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -588,6 +601,27 @@ function BrushToolbar({
         <Eraser className="size-4" />
         מחיקה
       </button>
+    );
+  }
+
+  function EditModeControls() {
+    return (
+      <>
+        <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
+          <Switch checked={editMode} onCheckedChange={onToggleEditMode} />
+          מצב עריכה
+        </label>
+        {editMode && (
+          <div className="flex gap-1 px-1">
+            <Button size="sm" onClick={onSave} disabled={saving} className="flex-1">
+              {saving ? "שומר..." : "שמור"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onDiscard} disabled={saving} className="flex-1">
+              התעלם
+            </Button>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -658,15 +692,22 @@ function BrushToolbar({
           />
         </button>
         {open && (
-          <div className="flex flex-wrap gap-1 border-t border-border/60 p-2">
-            <EraseButton />
-            <PersonButtons />
+          <div className="border-t border-border/60 p-2">
+            <div className="mb-1 flex flex-col gap-1 border-b border-border/60 pb-2">
+              <EditModeControls />
+            </div>
+            <div className="flex flex-wrap gap-1">
+              <EraseButton />
+              <PersonButtons />
+            </div>
           </div>
         )}
       </div>
 
       {/* Desktop: vertical sidebar next to the table */}
       <div className="sticky top-4 hidden shrink-0 flex-col gap-1 self-start rounded-md border border-border/60 bg-card p-2 md:flex">
+        <EditModeControls />
+        <div className="my-1 h-px bg-border/60" />
         <EraseButton />
         <div className="my-1 h-px bg-border/60" />
         <PersonButtons />

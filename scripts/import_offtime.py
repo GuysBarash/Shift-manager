@@ -13,9 +13,9 @@ What it reads (sheet "מכלול כללי חדש" of the workbook):
   - Row 2: date header (one column per day)
   - Row 5: holiday name per date, where present
   - Column A: role, column B: full name, one row per person
-  - A cell with 'X' in a person's row/date column means that person is
-    AT HOME that day (off duty) — anything else (blank, 'V', ...) means
-    they're presumed at base and needs no entry.
+  - A cell with 'V' in a person's row/date column means that person is
+    AT BASE that day — anything else (blank, 'X', ...) means AT HOME
+    (off duty). Only an explicit V counts as base; the default is home.
   - Every day strictly before the workbook's earliest date column is
     treated as pre-term leave for every matched person — the reserve
     term hasn't started yet, so there's no "at base" to default to.
@@ -53,7 +53,10 @@ DATE_ROW = 2
 DATE_ROW_LABEL = "תאריך"
 HOLIDAY_ROW = 5
 FIRST_DATA_ROW = 6
-HOME_MARK = "X"
+# Only an explicit 'V' means at-base — blank, 'X', or anything else means
+# at home. This inverts the earlier "blank defaults to base" assumption per
+# explicit correction: not-X-and-not-V is the same as X (at home).
+BASE_MARK = "V"
 
 DOCKER_EXE = r"C:\Users\Barash\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
 DB_CONTAINER = "supabase_db_shift-manager"
@@ -136,7 +139,7 @@ def extract(path: Path):
         home_dates = []
         for c, d in dates.items():
             v = ws.cell(row=r, column=c).value
-            if v == HOME_MARK:
+            if v != BASE_MARK:
                 home_dates.append(d)
         home_dates.sort()
         ranges = []
