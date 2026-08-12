@@ -16,6 +16,9 @@ What it reads (sheet "מכלול כללי חדש" of the workbook):
   - A cell with 'X' in a person's row/date column means that person is
     AT HOME that day (off duty) — anything else (blank, 'V', ...) means
     they're presumed at base and needs no entry.
+  - Every day strictly before the workbook's earliest date column is
+    treated as pre-term leave for every matched person — the reserve
+    term hasn't started yet, so there's no "at base" to default to.
 
 What it writes (into this scripts/ dir, always):
   - seed_offtime.sql   — replaces public.time_off for every person found
@@ -35,9 +38,15 @@ than silently failing.
 import argparse
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import openpyxl
+
+# Safely before any realistic "today" the app will be viewed on, so the
+# pre-term leave range always covers "now" regardless of when this script
+# actually gets run relative to the term start date.
+PRE_TERM_ANCHOR_ISO = "2000-01-01"
 
 SHEET_NAME = "מכלול כללי חדש"
 DATE_ROW = 2
@@ -138,11 +147,21 @@ def extract(path: Path):
                 ranges.append((d, d))
         people[name] = ranges
 
-    return holidays, people
+    term_start = min(dates.values()) if dates else None
+    return holidays, people, term_start
 
 
-def build_sql(people: dict[str, list], known_names: set[str]) -> str:
+def build_sql(people: dict[str, list], known_names: set[str], term_start) -> str:
     matched = {name: ranges for name, ranges in people.items() if not known_names or name in known_names}
+
+    if term_start is not None:
+        from datetime import date as _date
+
+        anchor = _date.fromisoformat(PRE_TERM_ANCHOR_ISO)
+        pre_term_end = term_start - timedelta(days=1)
+        if pre_term_end >= anchor:
+            for name in matched:
+                matched[name] = [(anchor, pre_term_end)] + matched[name]
     skipped = [name for name in people if known_names and name not in known_names]
     for name in skipped:
         print(f"warning: '{name}' not found in profiles table, skipping", file=sys.stderr)
@@ -189,9 +208,9 @@ def main():
     parser.add_argument("--apply-local", action="store_true", help="also run the SQL against the local DB")
     args = parser.parse_args()
 
-    holidays, people = extract(args.xlsx)
+    holidays, people, term_start = extract(args.xlsx)
     known_names = load_known_profile_names()
-    sql = build_sql(people, known_names)
+    sql = build_sql(people, known_names, term_start)
 
     out_dir = Path(__file__).resolve().parent
     sql_path = out_dir / "seed_offtime.sql"
