@@ -11,6 +11,14 @@ export function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+// `new Date("YYYY-MM-DD")` parses as UTC midnight, which can shift the
+// displayed day backward in local timezones behind UTC — parse the parts
+// directly into a local-time Date instead.
+export function parseISODate(iso: string): Date {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * DAY_MS);
 }

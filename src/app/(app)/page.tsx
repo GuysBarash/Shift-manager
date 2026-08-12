@@ -749,7 +749,14 @@ function FragmentDay({
                     >
                       {assignee.full_name}
                     </span>
-                  ) : null}
+                  ) : (
+                    // A truly empty cell (no text node at all) collapses its
+                    // line-box height, making this row shorter than rows with
+                    // a real name — the exact bug that misaligned the
+                    // extended table before. An invisible non-breaking space
+                    // keeps the cell visually empty while holding the height.
+                    <span aria-hidden="true">{" "}</span>
+                  )}
                 </td>
               );
             })}
