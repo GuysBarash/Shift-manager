@@ -6,11 +6,12 @@ import { addDays, formatDDMMYYYY, formatDowShort, startOfDay, toISODate } from "
 import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
+import { SCHEDULE_RANGE_DAYS } from "@/lib/schedule-range";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
-const RANGE_DAYS = 120;
+const RANGE_DAYS = SCHEDULE_RANGE_DAYS;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 
 export default function OffTimePage() {

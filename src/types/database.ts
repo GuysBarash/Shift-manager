@@ -5,6 +5,7 @@ export type Profile = {
   color: string | null;
   sambatz: boolean;
   is_admin: boolean;
+  role: string | null;
   created_at: string;
 };
 

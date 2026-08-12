@@ -1,5 +1,3 @@
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export function toISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -19,8 +17,13 @@ export function parseISODate(iso: string): Date {
   return new Date(y, m - 1, d);
 }
 
+// Calendar-based, not millisecond arithmetic — adding a fixed 24h offset
+// breaks across a DST transition (skips or repeats a calendar day), which a
+// 7-day range never reached but a 120-day one does (e.g. Israel's autumn
+// clock change). Date's constructor correctly rolls the day field over
+// month/year boundaries on its own.
 export function addDays(date: Date, days: number): Date {
-  return new Date(date.getTime() + days * DAY_MS);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, date.getHours(), date.getMinutes(), date.getSeconds());
 }
 
 // Hardcoded (not Intl-derived) so server and client always render identical

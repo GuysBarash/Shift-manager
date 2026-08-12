@@ -178,6 +178,7 @@ export default function PeoplePage() {
                         {p.is_admin && <Badge variant="secondary">מנהל</Badge>}
                         {p.sambatz && <Badge variant="outline">סמבצ</Badge>}
                       </div>
+                      {p.role && <div className="text-sm text-muted-foreground">{p.role}</div>}
                       {p.phone && <div className="text-sm text-muted-foreground">{p.phone}</div>}
                     </div>
                   </div>

@@ -14,13 +14,14 @@ import {
 } from "@/lib/dates";
 import { buildColorAssignments } from "@/lib/person-color";
 import { useDemoIdentity } from "@/lib/demo-identity";
+import { SCHEDULE_RANGE_DAYS } from "@/lib/schedule-range";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ActivityPanel } from "@/components/activity-panel";
 import { ChevronDown, Eraser } from "lucide-react";
 
-const RANGE_DAYS = 7;
+const RANGE_DAYS = SCHEDULE_RANGE_DAYS;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 // Two fixed slots per hour rather than positions derived from existing
 // shifts — that made an empty board a dead end (no columns meant nowhere to
@@ -515,19 +516,29 @@ export default function ShiftsPage() {
                         <tr key={`${iso}-people-${hour}`}>
                           {sambatzProfiles.map((p) => {
                             const onShift = row[p.id];
-                            const offToday = !onShift && isOnTimeOff(p.id, iso);
+                            const atHome = isOnTimeOff(p.id, iso);
+                            // Home but still on shift is a real scheduling
+                            // conflict (allowed, but should be unmistakable
+                            // at a glance) — stripe the two states together
+                            // instead of picking one silently.
+                            const conflict = !!onShift && atHome;
                             const color = colorAssignments.get(p.id);
+                            const cellStyle: React.CSSProperties = conflict
+                              ? {
+                                  backgroundImage: `repeating-linear-gradient(45deg, ${color?.hex}88 0px, ${color?.hex}88 6px, ${TIME_OFF_COLOR} 6px, ${TIME_OFF_COLOR} 12px)`,
+                                  border: "2px solid var(--destructive)",
+                                  boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                                }
+                              : onShift
+                                ? { backgroundColor: `${color?.hex}55` }
+                                : atHome
+                                  ? { backgroundColor: TIME_OFF_COLOR }
+                                  : {};
                             return (
                               <td
                                 key={p.id}
                                 className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
-                                style={{
-                                  backgroundColor: onShift
-                                    ? `${color?.hex}55`
-                                    : offToday
-                                      ? TIME_OFF_COLOR
-                                      : undefined,
-                                }}
+                                style={cellStyle}
                               >
                                 {" "}
                               </td>
