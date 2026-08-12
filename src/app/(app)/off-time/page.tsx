@@ -1,19 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import { addDays, formatDDMMYYYY, formatDowShort, parseISODate, startOfDay, toISODate } from "@/lib/dates";
+import { addDays, formatDDMMYYYY, formatDowShort, startOfDay, toISODate } from "@/lib/dates";
 import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Trash2 } from "lucide-react";
 
 const RANGE_DAYS = 120;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
@@ -24,11 +19,7 @@ export default function OffTimePage() {
   const [entries, setEntries] = useState<TimeOff[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [viewAll, setViewAll] = useState(true);
-
-  const [startDate, setStartDate] = useState(toISODate(new Date()));
-  const [endDate, setEndDate] = useState(toISODate(new Date()));
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const todayIso = useMemo(() => toISODate(rangeStart), [rangeStart]);
@@ -40,7 +31,6 @@ export default function OffTimePage() {
   // Only Sambatz actually get scheduled, so only they're meaningful here —
   // same scoping as the paint palette on the shifts page.
   const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
-  const isSambatz = sambatzProfiles.some((p) => p.id === userId);
   const visibleProfiles = viewAll ? sambatzProfiles : sambatzProfiles.filter((p) => p.id === userId);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
@@ -80,47 +70,18 @@ export default function OffTimePage() {
     load();
   }, [load]);
 
-  async function handleAdd(e: React.FormEvent) {
-    e.preventDefault();
-    if (endDate < startDate) {
-      toast.error("תאריך הסיום חייב להיות שווה או מאוחר מתאריך ההתחלה.");
-      return;
-    }
-    setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase.from("time_off").insert({
-      user_id: userId,
-      start_date: startDate,
-      end_date: endDate,
-    });
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    toast.success("נוסף.");
-    load();
+  function scrollToNow() {
+    document.getElementById(`offrow-${todayIso}`)?.scrollIntoView({ behavior: "auto", block: "center" });
   }
-
-  async function handleDelete(id: string) {
-    const supabase = createClient();
-    const { error } = await supabase.from("time_off").delete().eq("id", id);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    load();
-  }
-
-  const myEntries = entries
-    .filter((e) => e.user_id === userId)
-    .sort((a, b) => a.start_date.localeCompare(b.start_date));
 
   return (
     <div className="space-y-2 sm:space-y-4">
       <h1 className="text-base font-semibold tracking-wide glow-text sm:text-lg">לוח חופש</h1>
 
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <Button variant="outline" size="sm" onClick={scrollToNow}>
+          עכשיו!
+        </Button>
         <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
           <Switch checked={viewAll} onCheckedChange={setViewAll} />
           {viewAll ? "מציג את כולם" : "מציג רק אותי"}
@@ -134,7 +95,7 @@ export default function OffTimePage() {
           אין עדיין סמבצניקים.
         </div>
       ) : (
-        <div className="max-h-[60vh] overflow-auto rounded-md border border-border/60 glow-border sm:max-h-[70vh]">
+        <div className="max-h-[68vh] overflow-auto rounded-md border border-border/60 glow-border sm:max-h-[75vh]">
           <table className="border-collapse text-sm select-none">
             <thead className="sticky top-0 z-20 bg-card">
               <tr>
@@ -208,52 +169,6 @@ export default function OffTimePage() {
             </tbody>
           </table>
         </div>
-      )}
-
-      {isSambatz && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="tracking-wide glow-text">סימון חופש</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleAdd} className="grid gap-3 sm:grid-cols-3 sm:items-end">
-              <div className="space-y-2">
-                <Label htmlFor="start">מתאריך</Label>
-                <Input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="end">עד תאריך</Label>
-                <Input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-              </div>
-              <Button type="submit" disabled={saving}>
-                {saving ? "מוסיף..." : "הוספה"}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {isSambatz && myEntries.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="tracking-wide glow-text">התאריכים שלי</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {myEntries.map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center justify-between rounded-md border border-border/60 p-2 text-sm"
-              >
-                <span className="text-muted-foreground">
-                  {formatDDMMYYYY(parseISODate(entry.start_date))} ← {formatDDMMYYYY(parseISODate(entry.end_date))}
-                </span>
-                <Button variant="ghost" size="icon" onClick={() => handleDelete(entry.id)}>
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
       )}
     </div>
   );

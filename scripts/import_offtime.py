@@ -41,10 +41,9 @@ import openpyxl
 
 SHEET_NAME = "מכלול כללי חדש"
 DATE_ROW = 2
+DATE_ROW_LABEL = "תאריך"
 HOLIDAY_ROW = 5
 FIRST_DATA_ROW = 6
-NAME_COL = 2
-FIRST_DATE_COL = 3
 HOME_MARK = "X"
 
 DOCKER_EXE = r"C:\Users\Barash\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
@@ -94,10 +93,24 @@ def extract(path: Path):
     ws = wb[SHEET_NAME]
 
     max_col = ws.max_column
+
+    # The sheet layout has shifted between file variants (extra summary
+    # columns prepended in some) — locate the "תאריך" label in the date row
+    # rather than assuming a fixed column, and take the name column as the
+    # one right before it, dates starting right after.
+    name_col = None
+    for c in range(1, max_col + 1):
+        if ws.cell(row=DATE_ROW, column=c).value == DATE_ROW_LABEL:
+            name_col = c
+            break
+    if name_col is None:
+        raise ValueError(f"couldn't find the '{DATE_ROW_LABEL}' label in row {DATE_ROW} of '{SHEET_NAME}'")
+    first_date_col = name_col + 1
+
     dates = {}
-    for c in range(FIRST_DATE_COL, max_col + 1):
+    for c in range(first_date_col, max_col + 1):
         d = ws.cell(row=DATE_ROW, column=c).value
-        if d:
+        if hasattr(d, "date"):
             dates[c] = d.date()
 
     holidays = {}
@@ -108,7 +121,7 @@ def extract(path: Path):
 
     people = {}
     for r in range(FIRST_DATA_ROW, ws.max_row + 1):
-        name = ws.cell(row=r, column=NAME_COL).value
+        name = ws.cell(row=r, column=name_col).value
         if not name:
             continue
         home_dates = []
@@ -196,12 +209,7 @@ def main():
 
     if args.apply_local:
         print("Applying to local DB...")
-        result = subprocess.run(
-            ["npx", "supabase", "db", "query", "--local", "-f", str(sql_path)],
-            cwd=out_dir.parent,
-            shell=True,
-        )
-        sys.exit(result.returncode)
+        apply_sql_file(sql_path)
 
 
 if __name__ == "__main__":
