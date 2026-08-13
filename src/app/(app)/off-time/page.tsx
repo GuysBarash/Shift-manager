@@ -1,15 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { addDays, formatDDMMYYYY, formatDowShort, startOfDay, toISODate } from "@/lib/dates";
 import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
 import { scheduleRangeDays } from "@/lib/schedule-range";
+import { applyOffTimeImport, parseOffTimeWorkbook } from "@/lib/offtime-import";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Upload } from "lucide-react";
 
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 
@@ -20,6 +24,10 @@ export default function OffTimePage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewAll, setViewAll] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const todayIso = useMemo(() => toISODate(rangeStart), [rangeStart]);
@@ -77,6 +85,25 @@ export default function OffTimePage() {
     load();
   }, [load]);
 
+  async function handleImportFile(file: File) {
+    setImporting(true);
+    try {
+      const buffer = await file.arrayBuffer();
+      const extraction = parseOffTimeWorkbook(buffer);
+      const result = await applyOffTimeImport(extraction, profiles);
+      if (result.skipped.length > 0) {
+        toast.warning(`דולג על ${result.skipped.length} שמות שלא נמצאו: ${result.skipped.join(", ")}`);
+      }
+      toast.success(`הלוח עודכן: ${result.matchedCount} אנשים, ${result.insertedCount} טווחים.`);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "שגיאה בייבוא הקובץ.");
+    } finally {
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
   function scrollToNow() {
     document.getElementById(`offrow-${todayIso}`)?.scrollIntoView({ behavior: "auto", block: "center" });
   }
@@ -84,6 +111,39 @@ export default function OffTimePage() {
   return (
     <div className="space-y-2 sm:space-y-4">
       <h1 className="text-base font-semibold tracking-wide glow-text sm:text-lg">לוח חופש</h1>
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm tracking-wide glow-text">ייבוא לוח חופש</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleImportFile(file);
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="size-4" />
+              {importing ? "מעדכן..." : "העלאת קובץ גאנט (.xlsx)"}
+            </Button>
+            <p className="mt-2 text-xs text-muted-foreground">
+              מחליף לגמרי את לוח החופש עבור כל אדם שנמצא בקובץ, לפי השם המלא. אנשים שלא נמצאים
+              בקובץ לא ישתנו.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
         <Button variant="outline" size="sm" onClick={scrollToNow}>
