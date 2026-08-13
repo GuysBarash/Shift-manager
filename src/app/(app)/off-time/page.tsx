@@ -40,7 +40,12 @@ export default function OffTimePage() {
   // Only Sambatz actually get scheduled, so only they're meaningful here —
   // same scoping as the paint palette on the shifts page.
   const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
-  const visibleProfiles = viewAll ? sambatzProfiles : sambatzProfiles.filter((p) => p.id === userId);
+  const isSambatz = sambatzProfiles.some((p) => p.id === userId);
+  // "Just me" has nothing to show for someone with no column of their own —
+  // force "everyone" for them regardless of the (hidden, in that case)
+  // toggle state, so there's no empty-looking table.
+  const effectiveViewAll = isSambatz ? viewAll : true;
+  const visibleProfiles = effectiveViewAll ? sambatzProfiles : sambatzProfiles.filter((p) => p.id === userId);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
@@ -149,10 +154,12 @@ export default function OffTimePage() {
         <Button variant="outline" size="sm" onClick={scrollToNow}>
           עכשיו!
         </Button>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-          <Switch checked={viewAll} onCheckedChange={setViewAll} />
-          {viewAll ? "מציג את כולם" : "מציג רק אותי"}
-        </label>
+        {isSambatz && (
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={viewAll} onCheckedChange={setViewAll} />
+            {viewAll ? "מציג את כולם" : "מציג רק אותי"}
+          </label>
+        )}
       </div>
 
       {loading ? (
@@ -181,7 +188,7 @@ export default function OffTimePage() {
                     </th>
                   );
                 })}
-                {!viewAll && (
+                {!effectiveViewAll && (
                   <th className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide text-muted-foreground uppercase">
                     סמבצים
                   </th>
@@ -235,7 +242,7 @@ export default function OffTimePage() {
                         </td>
                       );
                     })}
-                    {!viewAll && (
+                    {!effectiveViewAll && (
                       <td
                         className={`border-b border-s border-border/60 px-2 py-1.5 text-center font-mono ${
                           isShabbat || holiday ? "bg-secondary/20" : ""
