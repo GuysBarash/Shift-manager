@@ -14,14 +14,13 @@ import {
 } from "@/lib/dates";
 import { buildColorAssignments } from "@/lib/person-color";
 import { useDemoIdentity } from "@/lib/demo-identity";
-import { SCHEDULE_RANGE_DAYS } from "@/lib/schedule-range";
+import { scheduleRangeDays } from "@/lib/schedule-range";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ActivityPanel } from "@/components/activity-panel";
 import { ChevronDown, Eraser } from "lucide-react";
 
-const RANGE_DAYS = SCHEDULE_RANGE_DAYS;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 // Two fixed slots per hour rather than positions derived from existing
 // shifts — that made an empty board a dead end (no columns meant nowhere to
@@ -118,9 +117,10 @@ export default function ShiftsPage() {
   }
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
+  const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
   const days = useMemo(
     () => Array.from({ length: RANGE_DAYS }, (_, i) => addDays(rangeStart, i)),
-    [rangeStart]
+    [rangeStart, RANGE_DAYS]
   );
 
   const profileById = useMemo(() => {

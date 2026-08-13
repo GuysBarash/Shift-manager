@@ -6,12 +6,11 @@ import { addDays, formatDDMMYYYY, formatDowShort, startOfDay, toISODate } from "
 import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
-import { SCHEDULE_RANGE_DAYS } from "@/lib/schedule-range";
+import { scheduleRangeDays } from "@/lib/schedule-range";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
-const RANGE_DAYS = SCHEDULE_RANGE_DAYS;
 const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 
 export default function OffTimePage() {
@@ -20,13 +19,14 @@ export default function OffTimePage() {
   const [entries, setEntries] = useState<TimeOff[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [viewAll, setViewAll] = useState(true);
+  const [viewAll, setViewAll] = useState(false);
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const todayIso = useMemo(() => toISODate(rangeStart), [rangeStart]);
+  const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
   const days = useMemo(
     () => Array.from({ length: RANGE_DAYS }, (_, i) => addDays(rangeStart, i)),
-    [rangeStart]
+    [rangeStart, RANGE_DAYS]
   );
 
   // Only Sambatz actually get scheduled, so only they're meaningful here —
@@ -50,6 +50,12 @@ export default function OffTimePage() {
     const list = entriesByPerson.get(personId);
     if (!list) return false;
     return list.some((t) => t.start_date <= dateIso && dateIso <= t.end_date);
+  }
+
+  // Only shown collapsed to "just me" — a headcount is more useful than a
+  // wall of columns once you're not comparing everyone side by side.
+  function atBaseCount(dateIso: string): number {
+    return sambatzProfiles.reduce((count, p) => count + (isOff(p.id, dateIso) ? 0 : 1), 0);
   }
 
   const load = useCallback(async () => {
@@ -115,6 +121,11 @@ export default function OffTimePage() {
                     </th>
                   );
                 })}
+                {!viewAll && (
+                  <th className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide text-muted-foreground uppercase">
+                    סמבצים
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -164,6 +175,15 @@ export default function OffTimePage() {
                         </td>
                       );
                     })}
+                    {!viewAll && (
+                      <td
+                        className={`border-b border-s border-border/60 px-2 py-1.5 text-center font-mono ${
+                          isShabbat || holiday ? "bg-secondary/20" : ""
+                        }`}
+                      >
+                        {atBaseCount(iso)}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
