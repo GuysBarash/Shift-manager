@@ -3,86 +3,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
-import {
-  addDays,
-  formatDDMMYYYY,
-  formatDow,
-  formatDowShort,
-  formatHourLabel,
-  startOfDay,
-  toISODate,
-} from "@/lib/dates";
+import { addDays, formatDDMMYYYY, formatDow, startOfDay, toISODate } from "@/lib/dates";
 import { buildColorAssignments } from "@/lib/person-color";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { scheduleRangeDays } from "@/lib/schedule-range";
+import { buildDateRange, isOnTimeOff, buildTimeOffIndex, sambatzProfiles as selectSambatz, TIME_OFF_COLOR } from "@/lib/roster";
+import { buildDayGrid, buildPersonHourGrid } from "@/lib/shift-grid";
+import { BrushToolbar, type Brush } from "@/components/brush-toolbar";
+import { FragmentDay } from "@/components/shift-day-rows";
 import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ActivityPanel } from "@/components/activity-panel";
-import { ChevronDown, Eraser } from "lucide-react";
 
-const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 // Two fixed slots per hour rather than positions derived from existing
 // shifts — that made an empty board a dead end (no columns meant nowhere to
 // paint a first shift).
 const SHIFT_COLUMNS = ["משמרת א׳", "משמרת ב׳"];
-
-function buildDayGrid(dayShifts: Shift[], columns: string[]): Record<string, Shift | null>[] {
-  const hourOwner: Record<string, (Shift | null)[]> = {};
-  for (const col of columns) {
-    hourOwner[col] = new Array(24).fill(null);
-  }
-  for (const shift of dayShifts) {
-    const col = shift.position ?? "";
-    if (!hourOwner[col]) continue;
-    const [startH] = shift.start_time.split(":").map(Number);
-    const [endH, endM, endS] = shift.end_time.split(":").map(Number);
-    const lastHour = endM === 0 && (endS ?? 0) === 0 ? endH - 1 : endH;
-    for (let h = startH; h <= lastHour && h < 24; h++) {
-      hourOwner[col][h] = shift;
-    }
-  }
-
-  const rows: Record<string, Shift | null>[] = [];
-  for (let h = 0; h < 24; h++) {
-    const row: Record<string, Shift | null> = {};
-    for (const col of columns) {
-      row[col] = hourOwner[col][h];
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-// Same idea as buildDayGrid, but keyed by person (across all positions) instead
-// of by position — powers the "extended" per-person status table.
-function buildPersonHourGrid(dayShifts: Shift[], personIds: string[]): Record<string, boolean>[] {
-  const hourOwner: Record<string, boolean[]> = {};
-  for (const pid of personIds) {
-    hourOwner[pid] = new Array(24).fill(false);
-  }
-  for (const shift of dayShifts) {
-    if (!shift.assigned_to || !hourOwner[shift.assigned_to]) continue;
-    const [startH] = shift.start_time.split(":").map(Number);
-    const [endH, endM, endS] = shift.end_time.split(":").map(Number);
-    const lastHour = endM === 0 && (endS ?? 0) === 0 ? endH - 1 : endH;
-    for (let h = startH; h <= lastHour && h < 24; h++) {
-      hourOwner[shift.assigned_to][h] = true;
-    }
-  }
-
-  const rows: Record<string, boolean>[] = [];
-  for (let h = 0; h < 24; h++) {
-    const row: Record<string, boolean> = {};
-    for (const pid of personIds) {
-      row[pid] = hourOwner[pid][h];
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-type Brush = "erase" | string | null;
 
 export default function ShiftsPage() {
   const { identity } = useDemoIdentity();
@@ -118,10 +55,7 @@ export default function ShiftsPage() {
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
-  const days = useMemo(
-    () => Array.from({ length: RANGE_DAYS }, (_, i) => addDays(rangeStart, i)),
-    [rangeStart, RANGE_DAYS]
-  );
+  const days = useMemo(() => buildDateRange(rangeStart, RANGE_DAYS), [rangeStart, RANGE_DAYS]);
 
   const profileById = useMemo(() => {
     const map = new Map<string, Profile>();
@@ -131,7 +65,7 @@ export default function ShiftsPage() {
 
   // Only Sambatz can actually be assigned to shifts — the paint palette and
   // the per-person extended table are scoped to them.
-  const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
+  const sambatzProfiles = useMemo(() => selectSambatz(profiles), [profiles]);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
@@ -145,21 +79,7 @@ export default function ShiftsPage() {
     return map;
   }, [shifts]);
 
-  const timeOffByPerson = useMemo(() => {
-    const map = new Map<string, TimeOff[]>();
-    timeOff.forEach((t) => {
-      const list = map.get(t.user_id) ?? [];
-      list.push(t);
-      map.set(t.user_id, list);
-    });
-    return map;
-  }, [timeOff]);
-
-  function isOnTimeOff(personId: string, dateIso: string): boolean {
-    const entries = timeOffByPerson.get(personId);
-    if (!entries) return false;
-    return entries.some((t) => t.start_date <= dateIso && dateIso <= t.end_date);
-  }
+  const timeOffIndex = useMemo(() => buildTimeOffIndex(timeOff), [timeOff]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -519,7 +439,7 @@ export default function ShiftsPage() {
                         <tr key={`${iso}-people-${hour}`}>
                           {sambatzProfiles.map((p) => {
                             const onShift = row[p.id];
-                            const atHome = isOnTimeOff(p.id, iso);
+                            const atHome = isOnTimeOff(timeOffIndex, p.id, iso);
                             // Home but still on shift is a real scheduling
                             // conflict (allowed, but should be unmistakable
                             // at a glance) — stripe the two states together
@@ -543,7 +463,7 @@ export default function ShiftsPage() {
                                 className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
                                 style={cellStyle}
                               >
-                                {" "}
+                                {" "}
                               </td>
                             );
                           })}
@@ -558,263 +478,5 @@ export default function ShiftsPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function BrushToolbar({
-  profiles,
-  colorAssignments,
-  brush,
-  onSelect,
-  editMode,
-  onToggleEditMode,
-  onSave,
-  onDiscard,
-  saving,
-}: {
-  profiles: Profile[];
-  colorAssignments: Map<string, { name: string; hex: string }>;
-  brush: Brush;
-  onSelect: (b: Brush) => void;
-  editMode: boolean;
-  onToggleEditMode: (on: boolean) => void;
-  onSave: () => void;
-  onDiscard: () => void;
-  saving: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-
-  const selectedProfile = brush && brush !== "erase" ? (profiles.find((p) => p.id === brush) ?? null) : null;
-  const selectedColor = selectedProfile ? colorAssignments.get(selectedProfile.id) : null;
-
-  function EraseButton() {
-    return (
-      <button
-        type="button"
-        onClick={() => onSelect(brush === "erase" ? null : "erase")}
-        className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors ${
-          brush === "erase"
-            ? "bg-destructive/15 text-destructive ring-1 ring-destructive/60"
-            : "text-muted-foreground hover:bg-accent"
-        }`}
-      >
-        <Eraser className="size-4" />
-        מחיקה
-      </button>
-    );
-  }
-
-  function EditModeControls() {
-    return (
-      <>
-        <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground">
-          <Switch checked={editMode} onCheckedChange={onToggleEditMode} />
-          מצב עריכה
-        </label>
-        {editMode && (
-          <div className="flex gap-1 px-1">
-            <Button size="sm" onClick={onSave} disabled={saving} className="flex-1">
-              {saving ? "שומר..." : "שמור"}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onDiscard} disabled={saving} className="flex-1">
-              התעלם
-            </Button>
-          </div>
-        )}
-      </>
-    );
-  }
-
-  function PersonButtons() {
-    return (
-      <>
-        {profiles.map((p) => {
-          const color = colorAssignments.get(p.id);
-          const selected = brush === p.id;
-          return (
-            <button
-              type="button"
-              key={p.id}
-              onClick={() => onSelect(selected ? null : p.id)}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors hover:bg-accent"
-              style={{
-                backgroundColor: selected && color ? `${color.hex}22` : undefined,
-                boxShadow: selected && color ? `0 0 0 1px ${color.hex}` : undefined,
-              }}
-            >
-              <span
-                className="size-3 shrink-0 rounded-full"
-                style={{
-                  backgroundColor: color?.hex,
-                  boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
-                }}
-              />
-              <span style={{ color: color?.hex }}>{p.full_name || "?"}</span>
-            </button>
-          );
-        })}
-      </>
-    );
-  }
-
-  return (
-    <>
-      {/* Mobile: frozen, collapsible bar above the table */}
-      <div className="sticky top-0 z-40 rounded-md border border-border/60 bg-card shadow-sm md:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className="flex w-full items-center justify-between gap-2 px-3 py-2"
-        >
-          <span className="flex items-center gap-2 text-xs">
-            {brush === "erase" ? (
-              <>
-                <Eraser className="size-3.5 text-destructive" />
-                <span className="text-destructive">מחיקה</span>
-              </>
-            ) : selectedProfile ? (
-              <>
-                <span
-                  className="size-3 shrink-0 rounded-full"
-                  style={{
-                    backgroundColor: selectedColor?.hex,
-                    boxShadow: selectedColor ? `0 0 6px ${selectedColor.hex}` : undefined,
-                  }}
-                />
-                <span style={{ color: selectedColor?.hex }}>{selectedProfile.full_name || "?"}</span>
-              </>
-            ) : (
-              <span className="text-muted-foreground">מברשת: בחר צבע</span>
-            )}
-          </span>
-          <ChevronDown
-            className={`size-4 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-          />
-        </button>
-        {open && (
-          <div className="border-t border-border/60 p-2">
-            <div className="mb-1 flex flex-col gap-1 border-b border-border/60 pb-2">
-              <EditModeControls />
-            </div>
-            <div className="flex flex-wrap gap-1">
-              <EraseButton />
-              <PersonButtons />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Desktop: vertical sidebar next to the table */}
-      <div className="sticky top-4 hidden shrink-0 flex-col gap-1 self-start rounded-md border border-border/60 bg-card p-2 md:flex">
-        <EditModeControls />
-        <div className="my-1 h-px bg-border/60" />
-        <EraseButton />
-        <div className="my-1 h-px bg-border/60" />
-        <PersonButtons />
-      </div>
-    </>
-  );
-}
-
-function FragmentDay({
-  iso,
-  day,
-  dayGrid,
-  columns,
-  isToday,
-  currentHour,
-  profileById,
-  colorAssignments,
-  userId,
-  brushActive,
-  onPaintDown,
-  onPaintEnter,
-}: {
-  iso: string;
-  day: Date;
-  dayGrid: Record<string, Shift | null>[];
-  columns: string[];
-  isToday: boolean;
-  currentHour: number;
-  profileById: Map<string, Profile>;
-  colorAssignments: Map<string, { name: string; hex: string }>;
-  userId: string;
-  brushActive: boolean;
-  onPaintDown: (hour: number, col: string) => void;
-  onPaintEnter: (hour: number, col: string) => void;
-}) {
-  return (
-    <>
-      {dayGrid.map((row, hour) => {
-        const isNowRow = isToday && hour === currentHour;
-        return (
-          <tr key={`${iso}-${hour}`} id={`row-${iso}-${hour}`}>
-            {hour === 0 && (
-              <td
-                rowSpan={24}
-                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary/40 px-1 py-1.5 align-top font-mono leading-tight ${
-                  isToday ? "text-primary glow-text" : "text-secondary-foreground"
-                }`}
-              >
-                <div className="text-xs font-bold">{formatDowShort(day)}</div>
-                <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
-                {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
-              </td>
-            )}
-            <td
-              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
-                isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
-              }`}
-            >
-              {formatHourLabel(hour)}
-              {isNowRow && <span className="animate-pulse">◄</span>}
-            </td>
-            {columns.map((col) => {
-              const shift = row[col];
-              const assignee = shift?.assigned_to ? profileById.get(shift.assigned_to) : null;
-              const color = shift?.assigned_to ? colorAssignments.get(shift.assigned_to) : null;
-              const isMine = shift?.assigned_to === userId;
-
-              return (
-                <td
-                  key={col}
-                  onMouseDown={() => onPaintDown(hour, col)}
-                  onMouseEnter={() => onPaintEnter(hour, col)}
-                  className={`border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
-                    brushActive ? "cursor-crosshair" : "cursor-default"
-                  } ${isNowRow && !shift ? "bg-primary/10" : ""} ${
-                    isMine ? "ring-1 ring-inset ring-primary/50" : ""
-                  }`}
-                  style={
-                    shift
-                      ? {
-                          backgroundColor: color ? `${color.hex}22` : undefined,
-                          borderInlineStart: color ? `3px solid ${color.hex}` : undefined,
-                        }
-                      : undefined
-                  }
-                >
-                  {shift && assignee ? (
-                    <span
-                      className="font-medium"
-                      style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
-                    >
-                      {assignee.full_name}
-                    </span>
-                  ) : (
-                    // A truly empty cell (no text node at all) collapses its
-                    // line-box height, making this row shorter than rows with
-                    // a real name — the exact bug that misaligned the
-                    // extended table before. An invisible non-breaking space
-                    // keeps the cell visually empty while holding the height.
-                    <span aria-hidden="true">{" "}</span>
-                  )}
-                </td>
-              );
-            })}
-          </tr>
-        );
-      })}
-    </>
   );
 }

@@ -1,9 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDemoIdentity } from "@/lib/demo-identity";
-import { personColor } from "@/lib/person-color";
+import { createClient } from "@/lib/supabase/client";
+import { buildColorAssignments } from "@/lib/person-color";
+import type { Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -16,7 +19,21 @@ const LINKS = [
 export function NavBar() {
   const pathname = usePathname();
   const { identity, switchUser } = useDemoIdentity();
-  const color = personColor(identity.userId, null);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("profiles")
+      .select("*")
+      .then(({ data }) => setProfiles(data ?? []));
+  }, []);
+
+  // Needs the full roster (not just this one person) — colors are assigned
+  // in coordination with everyone else's, so computing this from identity
+  // alone previously ignored a person's own explicit color override and
+  // showed a different dot here than everywhere else in the app.
+  const color = buildColorAssignments(profiles).get(identity.userId);
 
   return (
     <header className="border-b border-border/60 bg-card/40">

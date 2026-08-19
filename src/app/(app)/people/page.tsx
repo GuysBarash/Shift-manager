@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { PALETTE, buildColorAssignments } from "@/lib/person-color";
+import { isAdmin as selectIsAdmin } from "@/lib/roster";
 import type { Profile } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,7 +44,7 @@ export default function PeoplePage() {
     load();
   }, []);
 
-  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
+  const isAdmin = selectIsAdmin(profiles, userId);
 
   function startEdit(p: Profile) {
     setEditingId(p.id);

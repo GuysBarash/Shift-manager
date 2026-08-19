@@ -1,29 +1,28 @@
+import { addDays as addDaysFns, format, parse, startOfDay as startOfDayFns } from "date-fns";
+
+// Pure numeric tokens (yyyy/MM/dd) — date-fns doesn't consult locale for
+// these, so this stays safe for SSR/client hydration the same way the old
+// hand-rolled version was.
 export function toISODate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return format(date, "yyyy-MM-dd");
 }
 
 export function startOfDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return startOfDayFns(date);
 }
 
-// `new Date("YYYY-MM-DD")` parses as UTC midnight, which can shift the
-// displayed day backward in local timezones behind UTC — parse the parts
-// directly into a local-time Date instead.
+// date-fns parses "yyyy-MM-dd" into local-time date fields, unlike
+// `new Date("yyyy-MM-dd")` which parses as UTC midnight and can shift the
+// displayed day backward in timezones behind UTC.
 export function parseISODate(iso: string): Date {
-  const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  return parse(iso, "yyyy-MM-dd", new Date());
 }
 
-// Calendar-based, not millisecond arithmetic — adding a fixed 24h offset
-// breaks across a DST transition (skips or repeats a calendar day), which a
-// 7-day range never reached but a 120-day one does (e.g. Israel's autumn
-// clock change). Date's constructor correctly rolls the day field over
-// month/year boundaries on its own.
+// date-fns adds calendar days (not a fixed 24h offset), so this is safe
+// across DST transitions — a fixed-offset version broke across Israel's
+// autumn clock change once the shifts/off-time range grew past a week.
 export function addDays(date: Date, days: number): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days, date.getHours(), date.getMinutes(), date.getSeconds());
+  return addDaysFns(date, days);
 }
 
 // Hardcoded (not Intl-derived) so server and client always render identical
@@ -40,10 +39,7 @@ export function formatDowShort(date: Date): string {
 }
 
 export function formatDDMMYYYY(date: Date): string {
-  const dd = String(date.getDate()).padStart(2, "0");
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const yyyy = date.getFullYear();
-  return `${dd}.${mm}.${yyyy}`;
+  return format(date, "dd.MM.yyyy");
 }
 
 export function formatTime(time: string): string {

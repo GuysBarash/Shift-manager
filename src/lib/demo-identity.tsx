@@ -13,6 +13,7 @@
 // RLS changes and how to revert everything when deploying for real.
 
 import { createContext, useContext, useEffect, useState } from "react";
+import Cookies from "js-cookie";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,20 +22,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 const COOKIE_NAME = "demo_person_id";
 const COOKIE_DAYS = 365;
-
-function readCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
-}
-
-function writeCookie(name: string, value: string, days: number) {
-  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
-  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
-}
-
-function clearCookie(name: string) {
-  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
-}
 
 type DemoIdentity = {
   userId: string;
@@ -66,7 +53,7 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
     // `authenticated` was never granted INSERT on profiles, only `anon` was
     // (see the demo-mode migration). Force it out so requests are always anon.
     supabase.auth.signOut().finally(() => {
-      const id = readCookie(COOKIE_NAME);
+      const id = Cookies.get(COOKIE_NAME);
       if (!id) {
         setReady(true);
         return;
@@ -80,7 +67,7 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
           if (data) {
             setIdentity({ userId: data.id, fullName: data.full_name || "" });
           } else {
-            clearCookie(COOKIE_NAME);
+            Cookies.remove(COOKIE_NAME);
           }
           setReady(true);
         });
@@ -109,12 +96,12 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
       return;
     }
 
-    writeCookie(COOKIE_NAME, existing.id, COOKIE_DAYS);
+    Cookies.set(COOKIE_NAME, existing.id, { expires: COOKIE_DAYS, sameSite: "lax" });
     setIdentity({ userId: existing.id, fullName: existing.full_name || trimmed });
   }
 
   function switchUser() {
-    clearCookie(COOKIE_NAME);
+    Cookies.remove(COOKIE_NAME);
     setIdentity(null);
   }
 

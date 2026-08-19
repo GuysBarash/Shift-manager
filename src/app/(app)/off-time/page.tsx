@@ -9,13 +9,20 @@ import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
 import { scheduleRangeDays } from "@/lib/schedule-range";
 import { applyOffTimeImport, parseOffTimeWorkbook } from "@/lib/offtime-import";
+import {
+  buildDateRange,
+  buildTimeOffIndex,
+  isAdmin as selectIsAdmin,
+  isOnTimeOff,
+  isSambatz as selectIsSambatz,
+  sambatzProfiles as selectSambatz,
+  TIME_OFF_COLOR,
+} from "@/lib/roster";
 import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Upload } from "lucide-react";
-
-const TIME_OFF_COLOR = "rgba(148, 163, 184, 0.35)";
 
 export default function OffTimePage() {
   const { identity } = useDemoIdentity();
@@ -27,20 +34,17 @@ export default function OffTimePage() {
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const isAdmin = profiles.find((p) => p.id === userId)?.is_admin ?? false;
+  const isAdmin = selectIsAdmin(profiles, userId);
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const todayIso = useMemo(() => toISODate(rangeStart), [rangeStart]);
   const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
-  const days = useMemo(
-    () => Array.from({ length: RANGE_DAYS }, (_, i) => addDays(rangeStart, i)),
-    [rangeStart, RANGE_DAYS]
-  );
+  const days = useMemo(() => buildDateRange(rangeStart, RANGE_DAYS), [rangeStart, RANGE_DAYS]);
 
   // Only Sambatz actually get scheduled, so only they're meaningful here —
   // same scoping as the paint palette on the shifts page.
-  const sambatzProfiles = useMemo(() => profiles.filter((p) => p.sambatz), [profiles]);
-  const isSambatz = sambatzProfiles.some((p) => p.id === userId);
+  const sambatzProfiles = useMemo(() => selectSambatz(profiles), [profiles]);
+  const isSambatz = selectIsSambatz(profiles, userId);
   // "Just me" has nothing to show for someone with no column of their own —
   // force "everyone" for them regardless of the (hidden, in that case)
   // toggle state, so there's no empty-looking table.
@@ -49,26 +53,12 @@ export default function OffTimePage() {
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
-  const entriesByPerson = useMemo(() => {
-    const map = new Map<string, TimeOff[]>();
-    entries.forEach((t) => {
-      const list = map.get(t.user_id) ?? [];
-      list.push(t);
-      map.set(t.user_id, list);
-    });
-    return map;
-  }, [entries]);
-
-  function isOff(personId: string, dateIso: string): boolean {
-    const list = entriesByPerson.get(personId);
-    if (!list) return false;
-    return list.some((t) => t.start_date <= dateIso && dateIso <= t.end_date);
-  }
+  const timeOffIndex = useMemo(() => buildTimeOffIndex(entries), [entries]);
 
   // Only shown collapsed to "just me" — a headcount is more useful than a
   // wall of columns once you're not comparing everyone side by side.
   function atBaseCount(dateIso: string): number {
-    return sambatzProfiles.reduce((count, p) => count + (isOff(p.id, dateIso) ? 0 : 1), 0);
+    return sambatzProfiles.reduce((count, p) => count + (isOnTimeOff(timeOffIndex, p.id, dateIso) ? 0 : 1), 0);
   }
 
   const load = useCallback(async () => {
@@ -216,7 +206,7 @@ export default function OffTimePage() {
                       {holiday && <div className="text-[9px]">{holiday}</div>}
                     </td>
                     {visibleProfiles.map((p) => {
-                      const off = isOff(p.id, iso);
+                      const off = isOnTimeOff(timeOffIndex, p.id, iso);
                       const color = colorAssignments.get(p.id);
                       return (
                         <td

@@ -1,0 +1,105 @@
+import { formatDDMMYYYY, formatDowShort, formatHourLabel } from "@/lib/dates";
+import type { Profile, Shift } from "@/types/database";
+
+export function FragmentDay({
+  iso,
+  day,
+  dayGrid,
+  columns,
+  isToday,
+  currentHour,
+  profileById,
+  colorAssignments,
+  userId,
+  brushActive,
+  onPaintDown,
+  onPaintEnter,
+}: {
+  iso: string;
+  day: Date;
+  dayGrid: Record<string, Shift | null>[];
+  columns: string[];
+  isToday: boolean;
+  currentHour: number;
+  profileById: Map<string, Profile>;
+  colorAssignments: Map<string, { name: string; hex: string }>;
+  userId: string;
+  brushActive: boolean;
+  onPaintDown: (hour: number, col: string) => void;
+  onPaintEnter: (hour: number, col: string) => void;
+}) {
+  return (
+    <>
+      {dayGrid.map((row, hour) => {
+        const isNowRow = isToday && hour === currentHour;
+        return (
+          <tr key={`${iso}-${hour}`} id={`row-${iso}-${hour}`}>
+            {hour === 0 && (
+              <td
+                rowSpan={24}
+                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary/40 px-1 py-1.5 align-top font-mono leading-tight ${
+                  isToday ? "text-primary glow-text" : "text-secondary-foreground"
+                }`}
+              >
+                <div className="text-xs font-bold">{formatDowShort(day)}</div>
+                <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
+                {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
+              </td>
+            )}
+            <td
+              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
+                isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
+              }`}
+            >
+              {formatHourLabel(hour)}
+              {isNowRow && <span className="animate-pulse">◄</span>}
+            </td>
+            {columns.map((col) => {
+              const shift = row[col];
+              const assignee = shift?.assigned_to ? profileById.get(shift.assigned_to) : null;
+              const color = shift?.assigned_to ? colorAssignments.get(shift.assigned_to) : null;
+              const isMine = shift?.assigned_to === userId;
+
+              return (
+                <td
+                  key={col}
+                  onMouseDown={() => onPaintDown(hour, col)}
+                  onMouseEnter={() => onPaintEnter(hour, col)}
+                  className={`border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
+                    brushActive ? "cursor-crosshair" : "cursor-default"
+                  } ${isNowRow && !shift ? "bg-primary/10" : ""} ${
+                    isMine ? "ring-1 ring-inset ring-primary/50" : ""
+                  }`}
+                  style={
+                    shift
+                      ? {
+                          backgroundColor: color ? `${color.hex}22` : undefined,
+                          borderInlineStart: color ? `3px solid ${color.hex}` : undefined,
+                        }
+                      : undefined
+                  }
+                >
+                  {shift && assignee ? (
+                    <span
+                      className="font-medium"
+                      style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
+                    >
+                      {assignee.full_name}
+                    </span>
+                  ) : (
+                    // A truly empty cell (no text node at all) collapses its
+                    // line-box height, making this row shorter than rows with
+                    // a real name — the exact bug that misaligned the
+                    // extended table before. An invisible non-breaking space
+                    // keeps the cell visually empty while holding the height.
+                    <span aria-hidden="true">{" "}</span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+        );
+      })}
+    </>
+  );
+}
