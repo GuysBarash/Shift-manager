@@ -1,4 +1,5 @@
 import { formatDDMMYYYY, formatDowShort, formatHourLabel } from "@/lib/dates";
+import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import type { Profile, Shift } from "@/types/database";
 
 export function FragmentDay({
@@ -32,16 +33,21 @@ export function FragmentDay({
     <>
       {dayGrid.map((row, hour) => {
         const isNowRow = isToday && hour === currentHour;
+        const isShabbat = day.getDay() === 6;
+        const holiday = ISRAELI_HOLIDAYS[iso];
         return (
           <tr key={`${iso}-${hour}`} id={`row-${iso}-${hour}`}>
             {hour === 0 && (
               <td
                 rowSpan={24}
-                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary/40 px-1 py-1.5 align-top font-mono leading-tight ${
-                  isToday ? "text-primary glow-text" : "text-secondary-foreground"
+                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
+                  isToday || isShabbat || holiday ? "text-primary glow-text" : "text-secondary-foreground"
                 }`}
               >
-                <div className="text-xs font-bold">{formatDowShort(day)}</div>
+                <div className="text-xs font-bold">
+                  {formatDowShort(day)}
+                  {holiday && ` (${holiday})`}
+                </div>
                 <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
                 {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
               </td>

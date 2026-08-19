@@ -194,16 +194,16 @@ export default function OffTimePage() {
                 return (
                   <tr key={iso} id={`offrow-${iso}`}>
                     <td
-                      className={`sticky start-0 z-10 w-16 min-w-16 max-w-16 border-b border-e border-border/60 bg-secondary/40 px-1 py-1.5 align-top font-mono leading-tight ${
-                        isShabbat || holiday ? "text-primary glow-text" : "text-secondary-foreground"
+                      className={`sticky start-0 z-10 w-16 min-w-16 max-w-16 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
+                        isToday || isShabbat || holiday ? "text-primary glow-text" : "text-secondary-foreground"
                       }`}
                     >
-                      <div className={`text-xs font-bold ${isToday ? "text-primary glow-text" : ""}`}>
+                      <div className="text-xs font-bold">
                         {formatDowShort(day)}
+                        {holiday && ` (${holiday})`}
                       </div>
                       <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
                       {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
-                      {holiday && <div className="text-[9px]">{holiday}</div>}
                     </td>
                     {visibleProfiles.map((p) => {
                       const off = isOnTimeOff(timeOffIndex, p.id, iso);
