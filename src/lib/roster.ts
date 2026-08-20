@@ -14,6 +14,12 @@ export function sambatzProfiles(profiles: Profile[]): Profile[] {
   return profiles.filter((p) => p.sambatz);
 }
 
+// The other half of the roster — everyone shown with the קצין badge on
+// the People page (i.e. not Sambatz). Same binary split, opposite set.
+export function officerProfiles(profiles: Profile[]): Profile[] {
+  return profiles.filter((p) => !p.sambatz);
+}
+
 export function isSambatz(profiles: Profile[], userId: string): boolean {
   return profiles.some((p) => p.id === userId && p.sambatz);
 }

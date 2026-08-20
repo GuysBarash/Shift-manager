@@ -15,6 +15,7 @@ import {
   isAdmin as selectIsAdmin,
   isOnTimeOff,
   isSambatz as selectIsSambatz,
+  officerProfiles as selectOfficers,
   sambatzProfiles as selectSambatz,
   TIME_OFF_COLOR,
 } from "@/lib/roster";
@@ -23,6 +24,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type Mode = "sambatz" | "officers";
 
 export default function OffTimePage() {
   const { identity } = useDemoIdentity();
@@ -31,25 +35,37 @@ export default function OffTimePage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewAll, setViewAll] = useState(false);
+  const [mode, setMode] = useState<Mode | null>(null);
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = selectIsAdmin(profiles, userId);
+  const isSambatz = selectIsSambatz(profiles, userId);
+
+  // Defaults to whichever group the logged-in person belongs to, but only
+  // once (the first time profiles load) — switching the tab afterward must
+  // stick, not get reset back on every re-render.
+  useEffect(() => {
+    if (mode === null && profiles.length > 0) {
+      setMode(isSambatz ? "sambatz" : "officers");
+    }
+  }, [mode, profiles, isSambatz]);
+  const effectiveMode: Mode = mode ?? "sambatz";
 
   const rangeStart = useMemo(() => startOfDay(new Date()), []);
   const todayIso = useMemo(() => toISODate(rangeStart), [rangeStart]);
   const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
   const days = useMemo(() => buildDateRange(rangeStart, RANGE_DAYS), [rangeStart, RANGE_DAYS]);
 
-  // Only Sambatz actually get scheduled, so only they're meaningful here —
-  // same scoping as the paint palette on the shifts page.
   const sambatzProfiles = useMemo(() => selectSambatz(profiles), [profiles]);
-  const isSambatz = selectIsSambatz(profiles, userId);
-  // "Just me" has nothing to show for someone with no column of their own —
-  // force "everyone" for them regardless of the (hidden, in that case)
-  // toggle state, so there's no empty-looking table.
-  const effectiveViewAll = isSambatz ? viewAll : true;
-  const visibleProfiles = effectiveViewAll ? sambatzProfiles : sambatzProfiles.filter((p) => p.id === userId);
+  const officerProfiles = useMemo(() => selectOfficers(profiles), [profiles]);
+  const groupProfiles = effectiveMode === "sambatz" ? sambatzProfiles : officerProfiles;
+  const groupLabel = effectiveMode === "sambatz" ? "סמבצים" : "קצינים";
+
+  // "Just me" is allowed even when the current tab isn't the viewer's own
+  // group — it should just come up empty (no column for them here), not be
+  // forced back to "everyone" or break.
+  const visibleProfiles = viewAll ? groupProfiles : groupProfiles.filter((p) => p.id === userId);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
@@ -58,7 +74,7 @@ export default function OffTimePage() {
   // Only shown collapsed to "just me" — a headcount is more useful than a
   // wall of columns once you're not comparing everyone side by side.
   function atBaseCount(dateIso: string): number {
-    return sambatzProfiles.reduce((count, p) => count + (isOnTimeOff(timeOffIndex, p.id, dateIso) ? 0 : 1), 0);
+    return groupProfiles.reduce((count, p) => count + (isOnTimeOff(timeOffIndex, p.id, dateIso) ? 0 : 1), 0);
   }
 
   const load = useCallback(async () => {
@@ -141,22 +157,37 @@ export default function OffTimePage() {
       )}
 
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+        <div className="flex rounded-md border border-border/60 p-0.5">
+          {(["sambatz", "officers"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={cn(
+                "rounded-[5px] px-3 py-1.5 text-sm font-medium tracking-wide uppercase transition-colors",
+                effectiveMode === m
+                  ? "glow-text bg-accent text-primary"
+                  : "text-muted-foreground hover:bg-accent/50"
+              )}
+            >
+              {m === "sambatz" ? "סמבצים" : "קצינים"}
+            </button>
+          ))}
+        </div>
         <Button variant="outline" size="sm" onClick={scrollToNow}>
           עכשיו!
         </Button>
-        {isSambatz && (
-          <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
-            <Switch checked={viewAll} onCheckedChange={setViewAll} />
-            {viewAll ? "מציג את כולם" : "מציג רק אותי"}
-          </label>
-        )}
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <Switch checked={viewAll} onCheckedChange={setViewAll} />
+          {viewAll ? "מציג את כולם" : "מציג רק אותי"}
+        </label>
       </div>
 
       {loading ? (
         <p className="text-sm text-muted-foreground">טוען…</p>
-      ) : sambatzProfiles.length === 0 ? (
+      ) : groupProfiles.length === 0 ? (
         <div className="rounded-md border border-dashed border-border/60 p-8 text-center text-sm text-muted-foreground">
-          אין עדיין סמבצניקים.
+          {effectiveMode === "sambatz" ? "אין עדיין סמבצניקים." : "אין עדיין קצינים."}
         </div>
       ) : (
         <div className="max-h-[68vh] overflow-auto rounded-md border border-border/60 glow-border sm:max-h-[75vh]">
@@ -178,9 +209,9 @@ export default function OffTimePage() {
                     </th>
                   );
                 })}
-                {!effectiveViewAll && (
+                {!viewAll && (
                   <th className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide text-muted-foreground uppercase">
-                    סמבצים
+                    {groupLabel}
                   </th>
                 )}
               </tr>
@@ -232,7 +263,7 @@ export default function OffTimePage() {
                         </td>
                       );
                     })}
-                    {!effectiveViewAll && (
+                    {!viewAll && (
                       <td
                         className={`border-b border-s border-border/60 px-2 py-1.5 text-center font-mono ${
                           isShabbat || holiday ? "bg-secondary/20" : ""
