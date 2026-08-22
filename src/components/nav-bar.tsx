@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { createClient } from "@/lib/supabase/client";
 import { buildColorAssignments } from "@/lib/person-color";
+import { isAdmin as selectIsAdmin } from "@/lib/roster";
 import type { Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ export function NavBar() {
   // alone previously ignored a person's own explicit color override and
   // showed a different dot here than everywhere else in the app.
   const color = buildColorAssignments(profiles).get(identity.userId);
+  const isAdmin = selectIsAdmin(profiles, identity.userId);
 
   return (
     <header className="border-b border-border/60 bg-card/40">
@@ -85,9 +87,11 @@ export function NavBar() {
               />
               <span style={{ color: color?.hex }}>{identity.fullName}</span>
             </span>
-            <Button variant="outline" size="sm" onClick={switchUser}>
-              החלפת שם
-            </Button>
+            {isAdmin && (
+              <Button variant="outline" size="sm" onClick={switchUser}>
+                החלפת שם
+              </Button>
+            )}
           </div>
         </div>
         <Link href="/" className="absolute inset-y-0 end-4 flex items-center">

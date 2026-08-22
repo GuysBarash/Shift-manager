@@ -93,7 +93,7 @@ export default function PeoplePage() {
         {profiles.map((p) => {
           const color = colorAssignments.get(p.id);
           const isMe = p.id === userId;
-          const canEdit = isMe || isAdmin;
+          const canEdit = isAdmin;
           const isEditing = editingId === p.id;
           return (
             <div key={p.id} className="rounded-md border border-border/60 p-3">
