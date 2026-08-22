@@ -39,15 +39,15 @@ export function NavBar() {
 
   return (
     <header className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto max-w-6xl px-4 py-3">
-        {/* Nav links and the logo share this row and never wrap apart from
-            each other — the logo must always stay on the same line as the
-            tabs, pinned to the visual left (DOM-last lands there under
-            dir="rtl", the conventional top-left corner regardless of text
-            direction). The identity/switch-user block is a separate row
-            below so it can wrap on narrow screens without dragging the logo
-            down with it. */}
-        <div className="flex items-center justify-between gap-3">
+      <div className="mx-auto flex max-w-6xl items-stretch justify-between gap-3 px-4 py-3">
+        {/* Nav + identity stack in their own column exactly as before (same
+            two rows, same gap) — wrapping them together just gives the logo
+            a sibling whose height it can match. The logo is pinned to the
+            visual left (DOM-last lands there under dir="rtl", the
+            conventional top-left corner regardless of text direction) and
+            stretched via items-stretch + h-full to span that column's full
+            height, whatever it ends up being, instead of a fixed size. */}
+        <div className="flex flex-col justify-center gap-2">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -67,23 +67,23 @@ export function NavBar() {
               );
             })}
           </nav>
-          <Link href="/" className="shrink-0">
-            <Image src={logo} alt="מנהל משמרות" priority className="h-14 w-auto sm:h-[88px]" />
-          </Link>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              מחובר כ
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
+              />
+              <span style={{ color: color?.hex }}>{identity.fullName}</span>
+            </span>
+            <Button variant="outline" size="sm" onClick={switchUser}>
+              החלפת שם
+            </Button>
+          </div>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            מחובר כ
-            <span
-              className="size-2 shrink-0 rounded-full"
-              style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
-            />
-            <span style={{ color: color?.hex }}>{identity.fullName}</span>
-          </span>
-          <Button variant="outline" size="sm" onClick={switchUser}>
-            החלפת שם
-          </Button>
-        </div>
+        <Link href="/" className="flex shrink-0">
+          <Image src={logo} alt="מנהל משמרות" priority className="h-full w-auto" />
+        </Link>
       </div>
     </header>
   );
