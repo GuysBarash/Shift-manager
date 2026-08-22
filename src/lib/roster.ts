@@ -43,3 +43,35 @@ export function isOnTimeOff(index: Map<string, TimeOff[]>, personId: string, dat
 export function buildDateRange(start: Date, days: number): Date[] {
   return Array.from({ length: days }, (_, i) => addDays(start, i));
 }
+
+// The roster's real command structure, in the order it appears in the
+// source roster spreadsheet. "מבצעים" is included alongside 'סמב"צ' because
+// older seeded rows use that label for the same category — both mean the
+// same group of people.
+export const ROLE_GROUPS: { label: string; roles: string[] }[] = [
+  { label: "פיקוד", roles: ["מפקד מכלול", "ס.מפקד מכלול"] },
+  { label: 'קמב"צ', roles: ['קמב"צ'] },
+  { label: "קש״א", roles: ["קש״א"] },
+  { label: "קמן", roles: ["קמן"] },
+  { label: 'סמב"צ', roles: ['סמב"צ', "מבצעים"] },
+  { label: "אש", roles: ["אש"] },
+  { label: "מודיעין", roles: ["מודיעין"] },
+];
+
+// Splits a roster into its command-structure categories, preserving
+// ROLE_GROUPS order and each group's incoming relative order. Anyone whose
+// role doesn't match a known category (e.g. left blank) still shows up,
+// grouped together at the end, instead of silently disappearing.
+export function groupProfilesByRole<T extends { role: string | null }>(
+  profiles: T[]
+): { label: string; members: T[] }[] {
+  const grouped = new Set<T>();
+  const groups = ROLE_GROUPS.map((g) => {
+    const members = profiles.filter((p) => g.roles.includes(p.role ?? ""));
+    members.forEach((p) => grouped.add(p));
+    return { label: g.label, members };
+  });
+  const rest = profiles.filter((p) => !grouped.has(p));
+  if (rest.length > 0) groups.push({ label: "אחר", members: rest });
+  return groups.filter((g) => g.members.length > 0);
+}

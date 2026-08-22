@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { PALETTE, buildColorAssignments } from "@/lib/person-color";
-import { isAdmin as selectIsAdmin } from "@/lib/roster";
+import { groupProfilesByRole, isAdmin as selectIsAdmin } from "@/lib/roster";
 import type { Profile } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,7 +33,6 @@ export default function PeoplePage() {
     const { data: profileRows, error } = await supabase
       .from("profiles")
       .select("*")
-      .order("sambatz", { ascending: false })
       .order("full_name", { ascending: true });
     if (error) console.error(error);
     setProfiles(profileRows ?? []);
@@ -90,14 +89,20 @@ export default function PeoplePage() {
         {!loading && profiles.length === 0 && (
           <p className="text-sm text-muted-foreground">עדיין אין כאן אף אחד.</p>
         )}
-        {profiles.map((p) => {
-          const color = colorAssignments.get(p.id);
-          const isMe = p.id === userId;
-          const canEdit = isAdmin;
-          const isEditing = editingId === p.id;
-          return (
-            <div key={p.id} className="rounded-md border border-border/60 p-3">
-              {isEditing ? (
+        {groupProfilesByRole(profiles).map((group) => (
+          <div key={group.label} className="rounded-lg border-2 border-border/60 p-3">
+            <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+              {group.label}
+            </h2>
+            <div className="space-y-2">
+              {group.members.map((p) => {
+                const color = colorAssignments.get(p.id);
+                const isMe = p.id === userId;
+                const canEdit = isAdmin;
+                const isEditing = editingId === p.id;
+                return (
+                  <div key={p.id} className="rounded-md border border-border/60 p-3">
+                    {isEditing ? (
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1">
@@ -189,10 +194,13 @@ export default function PeoplePage() {
                     </Button>
                   )}
                 </div>
-              )}
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </CardContent>
     </Card>
   );

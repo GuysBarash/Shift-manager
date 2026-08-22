@@ -12,6 +12,7 @@ import { applyOffTimeImport, parseOffTimeWorkbook } from "@/lib/offtime-import";
 import {
   buildDateRange,
   buildTimeOffIndex,
+  groupProfilesByRole,
   isAdmin as selectIsAdmin,
   isOnTimeOff,
   isSambatz as selectIsSambatz,
@@ -62,10 +63,24 @@ export default function OffTimePage() {
   const groupProfiles = effectiveMode === "sambatz" ? sambatzProfiles : officerProfiles;
   const groupLabel = effectiveMode === "sambatz" ? "סמבצים" : "קצינים";
 
+  // Columns are ordered by command-structure category (roleGroups) so each
+  // category occupies a contiguous run of columns — required for the merged
+  // header cell above each one to line up with colSpan.
+  const roleGroups = useMemo(() => groupProfilesByRole(groupProfiles), [groupProfiles]);
+  const orderedGroupProfiles = useMemo(() => roleGroups.flatMap((g) => g.members), [roleGroups]);
+
+  // First column of every category after the first — gets a heavier left
+  // border in the body too, so the category split reads clearly even while
+  // scrolled down past the merged header row.
+  const groupStartIds = useMemo(
+    () => new Set(roleGroups.slice(1).map((g) => g.members[0]?.id).filter((id): id is string => !!id)),
+    [roleGroups]
+  );
+
   // "Just me" is allowed even when the current tab isn't the viewer's own
   // group — it should just come up empty (no column for them here), not be
   // forced back to "everyone" or break.
-  const visibleProfiles = viewAll ? groupProfiles : groupProfiles.filter((p) => p.id === userId);
+  const visibleProfiles = viewAll ? orderedGroupProfiles : orderedGroupProfiles.filter((p) => p.id === userId);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
@@ -193,16 +208,42 @@ export default function OffTimePage() {
         <div className="max-h-[68vh] overflow-auto rounded-md border border-border/60 glow-border sm:max-h-[75vh]">
           <table className="border-collapse text-sm select-none">
             <thead className="sticky top-0 z-20 bg-card">
+              {/* Only meaningful with multiple columns — "just me" collapses
+                  to at most one column, so there's nothing to group. */}
+              {viewAll && (
+                <tr>
+                  <th
+                    rowSpan={2}
+                    className="sticky start-0 z-30 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase"
+                  >
+                    תאריך
+                  </th>
+                  {roleGroups.map((group) => (
+                    <th
+                      key={group.label}
+                      colSpan={group.members.length}
+                      className="border-b border-s-2 border-s-border border-b-border/60 bg-card px-2 py-1.5 text-center text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
+                    >
+                      {group.label}
+                    </th>
+                  ))}
+                </tr>
+              )}
               <tr>
-                <th className="sticky start-0 z-30 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                  תאריך
-                </th>
+                {!viewAll && (
+                  <th className="sticky start-0 z-30 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    תאריך
+                  </th>
+                )}
                 {visibleProfiles.map((p) => {
                   const color = colorAssignments.get(p.id);
                   return (
                     <th
                       key={p.id}
-                      className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
+                      className={cn(
+                        "min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text",
+                        groupStartIds.has(p.id) && "border-s-2 border-s-border"
+                      )}
                       style={{ color: color?.hex }}
                     >
                       {p.full_name || "?"}
