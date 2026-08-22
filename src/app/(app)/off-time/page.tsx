@@ -8,7 +8,7 @@ import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { buildColorAssignments } from "@/lib/person-color";
 import { scheduleRangeDays } from "@/lib/schedule-range";
-import { applyOffTimeImport, parseOffTimeWorkbook } from "@/lib/offtime-import";
+import { applyOffTimeImport, parseOffTimeWorkbook, type OffTimeExtraction } from "@/lib/offtime-import";
 import {
   buildDateRange,
   buildTimeOffIndex,
@@ -25,7 +25,7 @@ import type { TimeOff, Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Upload } from "lucide-react";
+import { CloudDownload, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Mode = "sambatz" | "officers";
@@ -39,6 +39,7 @@ export default function OffTimePage() {
   const [viewAll, setViewAll] = useState(false);
   const [mode, setMode] = useState<Mode | null>(null);
   const [importing, setImporting] = useState(false);
+  const [pulling, setPulling] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = selectIsAdmin(profiles, userId);
@@ -118,22 +119,49 @@ export default function OffTimePage() {
     load();
   }, [load]);
 
+  // Shared by both import paths (file upload and Drive pull) — same
+  // extraction shape either way, so applying it is identical.
+  async function applyExtraction(extraction: OffTimeExtraction) {
+    const result = await applyOffTimeImport(extraction, profiles);
+    if (result.skipped.length > 0) {
+      toast.warning(`דולג על ${result.skipped.length} שמות שלא נמצאו: ${result.skipped.join(", ")}`);
+    }
+    toast.success(`הלוח עודכן: ${result.matchedCount} אנשים, ${result.insertedCount} טווחים.`);
+    await load();
+  }
+
   async function handleImportFile(file: File) {
     setImporting(true);
     try {
       const buffer = await file.arrayBuffer();
-      const extraction = parseOffTimeWorkbook(buffer);
-      const result = await applyOffTimeImport(extraction, profiles);
-      if (result.skipped.length > 0) {
-        toast.warning(`דולג על ${result.skipped.length} שמות שלא נמצאו: ${result.skipped.join(", ")}`);
-      }
-      toast.success(`הלוח עודכן: ${result.matchedCount} אנשים, ${result.insertedCount} טווחים.`);
-      await load();
+      await applyExtraction(parseOffTimeWorkbook(buffer));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "שגיאה בייבוא הקובץ.");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  // Pulls the shared roster spreadsheet straight from Google Drive instead
+  // of requiring a manual download+upload. Goes through a server route
+  // (src/app/api/roster-pull) rather than fetching Google directly from the
+  // browser — Google's export endpoint doesn't send CORS headers, so a
+  // client-side fetch would just be blocked.
+  async function handlePullFromDrive() {
+    setPulling(true);
+    try {
+      const res = await fetch("/api/roster-pull");
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.error ?? "שגיאה במשיכת הגיליון מ-Drive.");
+      }
+      const buffer = await res.arrayBuffer();
+      await applyExtraction(parseOffTimeWorkbook(buffer));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "שגיאה במשיכת הגיליון מ-Drive.");
+    } finally {
+      setPulling(false);
     }
   }
 
@@ -161,15 +189,21 @@ export default function OffTimePage() {
                 if (file) handleImportFile(file);
               }}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={importing}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="size-4" />
-              {importing ? "מעדכן..." : "העלאת קובץ גאנט (.xlsx)"}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={importing}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Upload className="size-4" />
+                {importing ? "מעדכן..." : "העלאת קובץ גאנט (.xlsx)"}
+              </Button>
+              <Button variant="outline" size="sm" disabled={pulling} onClick={handlePullFromDrive}>
+                <CloudDownload className="size-4" />
+                {pulling ? "מושך..." : "משיכה מ-Drive"}
+              </Button>
+            </div>
             <p className="mt-2 text-xs text-muted-foreground">
               מחליף לגמרי את לוח החופש עבור כל אדם שנמצא בקובץ, לפי השם המלא. אנשים שלא נמצאים
               בקובץ לא ישתנו.
