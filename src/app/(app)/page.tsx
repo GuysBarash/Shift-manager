@@ -419,16 +419,16 @@ export default function ShiftsPage() {
               <table className="shrink-0 border-collapse text-sm select-none">
                 <thead className="sticky top-0 z-20 bg-card">
                   <tr>
-                    <th className="sticky start-0 z-30 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    <th className="sticky start-0 z-30 h-9 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                       תאריך
                     </th>
-                    <th className="sticky start-14 z-30 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    <th className="sticky start-14 z-30 h-9 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                       שעה
                     </th>
                     {SHIFT_COLUMNS.map((col) => (
                       <th
                         key={col}
-                        className="min-w-32 border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
+                        className="h-9 min-w-32 truncate border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
                       >
                         {col}
                       </th>
@@ -469,7 +469,7 @@ export default function ShiftsPage() {
                         return (
                           <th
                             key={p.id}
-                            className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
+                            className="h-9 min-w-24 truncate border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
                             style={{ color: color?.hex }}
                           >
                             {p.full_name || "?"}
