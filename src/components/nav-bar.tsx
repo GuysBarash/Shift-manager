@@ -39,8 +39,15 @@ export function NavBar() {
 
   return (
     <header className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="mx-auto max-w-6xl px-4 py-3">
+        {/* Nav links and the logo share this row and never wrap apart from
+            each other — the logo must always stay on the same line as the
+            tabs, pinned to the visual left (DOM-last lands there under
+            dir="rtl", the conventional top-left corner regardless of text
+            direction). The identity/switch-user block is a separate row
+            below so it can wrap on narrow screens without dragging the logo
+            down with it. */}
+        <div className="flex items-center justify-between gap-3">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -60,26 +67,23 @@ export function NavBar() {
               );
             })}
           </nav>
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              מחובר כ
-              <span
-                className="size-2 shrink-0 rounded-full"
-                style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
-              />
-              <span style={{ color: color?.hex }}>{identity.fullName}</span>
-            </span>
-            <Button variant="outline" size="sm" onClick={switchUser}>
-              החלפת שם
-            </Button>
-          </div>
+          <Link href="/" className="shrink-0">
+            <Image src={logo} alt="מנהל משמרות" priority className="h-14 w-auto sm:h-[88px]" />
+          </Link>
         </div>
-        {/* DOM-last lands on the visual left under dir="rtl" — the
-            conventional top-left corner for a site logo regardless of
-            text direction. */}
-        <Link href="/" className="shrink-0">
-          <Image src={logo} alt="מנהל משמרות" priority className="h-9 w-auto sm:h-11" />
-        </Link>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            מחובר כ
+            <span
+              className="size-2 shrink-0 rounded-full"
+              style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
+            />
+            <span style={{ color: color?.hex }}>{identity.fullName}</span>
+          </span>
+          <Button variant="outline" size="sm" onClick={switchUser}>
+            החלפת שם
+          </Button>
+        </div>
       </div>
     </header>
   );
