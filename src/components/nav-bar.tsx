@@ -39,15 +39,21 @@ export function NavBar() {
 
   return (
     <header className="border-b border-border/60 bg-card/40">
-      <div className="mx-auto flex max-w-6xl items-stretch justify-between gap-3 px-4 py-3">
+      <div className="relative mx-auto flex max-w-6xl px-4 py-3">
         {/* Nav + identity stack in their own column exactly as before (same
-            two rows, same gap) — wrapping them together just gives the logo
-            a sibling whose height it can match. The logo is pinned to the
-            visual left (DOM-last lands there under dir="rtl", the
-            conventional top-left corner regardless of text direction) and
-            stretched via items-stretch + h-full to span that column's full
-            height, whatever it ends up being, instead of a fixed size. */}
-        <div className="flex flex-col justify-center gap-2">
+            two rows, same gap, same flow) — its height is driven purely by
+            its own content, same as before this logo change, so the text
+            never moves. The logo is pulled OUT of that flow entirely
+            (absolute + inset-y-0) so it can span the header's full height
+            edge-to-edge without being able to influence — or be limited by
+            — the column's height (a plain h-full/items-stretch pairing here
+            is circular: with an auto-height row, the percentage falls back
+            to the image's own large intrinsic size and inflates the row).
+            It's pinned to the visual left (inset-inline-end lands there
+            under dir="rtl", the conventional top-left corner regardless of
+            text direction). The column gets pe-32 so its content never
+            renders underneath the logo on narrow screens. */}
+        <div className="flex flex-col justify-center gap-2 pe-32">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -81,7 +87,7 @@ export function NavBar() {
             </Button>
           </div>
         </div>
-        <Link href="/" className="flex shrink-0">
+        <Link href="/" className="absolute inset-y-0 end-4 flex items-center">
           <Image src={logo} alt="מנהל משמרות" priority className="h-full w-auto" />
         </Link>
       </div>
