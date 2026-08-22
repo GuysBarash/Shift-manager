@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import { toISODate } from "@/lib/dates";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { PALETTE, buildColorAssignments } from "@/lib/person-color";
-import { groupProfilesByRole, isAdmin as selectIsAdmin } from "@/lib/roster";
-import type { Profile } from "@/types/database";
+import { formatPhone } from "@/lib/phone";
+import { buildTimeOffIndex, groupProfilesByRole, isAdmin as selectIsAdmin, isOnTimeOff, TIME_OFF_COLOR } from "@/lib/roster";
+import type { Profile, TimeOff } from "@/types/database";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +21,7 @@ export default function PeoplePage() {
   const { identity } = useDemoIdentity();
   const userId = identity.userId;
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [timeOff, setTimeOff] = useState<TimeOff[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fullName, setFullName] = useState("");
@@ -27,15 +30,21 @@ export default function PeoplePage() {
   const [selectedSambatz, setSelectedSambatz] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const todayIso = useMemo(() => toISODate(new Date()), []);
+
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    const { data: profileRows, error } = await supabase
-      .from("profiles")
-      .select("*")
-      .order("full_name", { ascending: true });
+    const [{ data: profileRows, error }, { data: timeOffRows, error: timeOffError }] = await Promise.all([
+      supabase.from("profiles").select("*").order("full_name", { ascending: true }),
+      // Only today's rows — this page just needs "is this person out right
+      // now", not the full range the off-time/shifts pages track.
+      supabase.from("time_off").select("*").lte("start_date", todayIso).gte("end_date", todayIso),
+    ]);
     if (error) console.error(error);
+    if (timeOffError) console.error(timeOffError);
     setProfiles(profileRows ?? []);
+    setTimeOff(timeOffRows ?? []);
     setLoading(false);
   }
 
@@ -44,11 +53,12 @@ export default function PeoplePage() {
   }, []);
 
   const isAdmin = selectIsAdmin(profiles, userId);
+  const timeOffIndex = useMemo(() => buildTimeOffIndex(timeOff), [timeOff]);
 
   function startEdit(p: Profile) {
     setEditingId(p.id);
     setFullName(p.full_name ?? "");
-    setPhone(p.phone ?? "");
+    setPhone(formatPhone(p.phone));
     setSelectedColor(p.color);
     setSelectedSambatz(p.sambatz);
   }
@@ -100,8 +110,15 @@ export default function PeoplePage() {
                 const isMe = p.id === userId;
                 const canEdit = isAdmin;
                 const isEditing = editingId === p.id;
+                // פיקוד is never grayed out — command staff, not part of the
+                // out/in-base rotation this indicator tracks.
+                const isOut = group.label !== "פיקוד" && isOnTimeOff(timeOffIndex, p.id, todayIso);
                 return (
-                  <div key={p.id} className="rounded-md border border-border/60 p-3">
+                  <div
+                    key={p.id}
+                    className="rounded-md border border-border/60 p-3"
+                    style={isOut ? { backgroundColor: TIME_OFF_COLOR } : undefined}
+                  >
                     {isEditing ? (
                 <div className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -111,7 +128,7 @@ export default function PeoplePage() {
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor={`phone-${p.id}`}>טלפון</Label>
-                      <Input id={`phone-${p.id}`} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="אופציונלי" />
+                      <Input id={`phone-${p.id}`} value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} placeholder="אופציונלי" />
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -185,7 +202,7 @@ export default function PeoplePage() {
                         {p.sambatz ? <Badge variant="outline">סמבצ</Badge> : <Badge variant="outline">קצין</Badge>}
                       </div>
                       {p.role && <div className="text-sm text-muted-foreground">{p.role}</div>}
-                      {p.phone && <div className="text-sm text-muted-foreground">{p.phone}</div>}
+                      {p.phone && <div className="text-sm text-muted-foreground">{formatPhone(p.phone)}</div>}
                     </div>
                   </div>
                   {canEdit && (

@@ -15,6 +15,8 @@ import {
   TIME_OFF_COLOR,
 } from "@/lib/roster";
 import { buildDayGrid, buildPersonHourGrid } from "@/lib/shift-grid";
+import { buildSlots, planShifts } from "@/lib/shift-plan";
+import { buildAnchorsFromShifts, buildPresenceFromTimeOff } from "@/lib/shift-plan-adapter";
 import { BrushToolbar, type Brush } from "@/components/brush-toolbar";
 import { FragmentDay } from "@/components/shift-day-rows";
 import type { Profile, Shift, TimeOff } from "@/types/database";
@@ -344,11 +346,39 @@ export default function ShiftsPage() {
     });
   }
 
-  // TODO: the actual auto-fill algorithm. For now this just confirms the
-  // click landed on the right cell, so the palette button and the
-  // click-to-invoke plumbing are ready for it once it exists.
-  function continueFromHere(day: Date, hour: number) {
-    toast.info(`מילוי אוטומטי החל מ-${String(hour).padStart(2, "0")}:00, ${formatDDMMYYYY(day)} — טרם מומש.`);
+  // Auto-fill from the clicked day through the end of the visible range.
+  // Everything already in `shifts` (manual paints or an earlier auto-fill)
+  // is passed to the planner as anchors — read for rest-history continuity,
+  // never overwritten — so this only ever fills genuinely open slots at or
+  // after the clicked day. (Day-granular, not hour-granular: the planner's
+  // replan boundary is a whole calendar day, so the clicked hour only picks
+  // which day to start from.)
+  function continueFromHere(day: Date) {
+    const fromIso = toISODate(day);
+    const toIso = toISODate(addDays(rangeStart, RANGE_DAYS - 1));
+    try {
+      const people = buildPresenceFromTimeOff(sambatzProfiles, timeOffIndex, rangeStart, RANGE_DAYS);
+      const anchors = buildAnchorsFromShifts(shiftsRef.current, profileById);
+      const slots = buildSlots(fromIso, toIso, { columns: SHIFT_COLUMNS });
+      const result = planShifts(people, slots, anchors, { columns: SHIFT_COLUMNS, fromDate: fromIso });
+
+      const profileByName = new Map(sambatzProfiles.map((p) => [(p.full_name ?? "").trim(), p]));
+      let created = 0;
+      for (const row of result.rows) {
+        const profile = profileByName.get(row.person);
+        if (!profile) continue;
+        createLocalPiece(row.shift_date, row.position, row.start_time, row.end_time, profile.id, null);
+        created++;
+      }
+
+      const parts = [`מולאו ${created} משמרות`];
+      if (result.unfilled.length > 0) parts.push(`${result.unfilled.length} משבצות לא אוישו`);
+      if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} התנגשויות`);
+      if (result.worstRestH !== null) parts.push(`מנוחה מינימלית ${Math.round(result.worstRestH * 10) / 10} שעות`);
+      toast[result.conflicts.length > 0 ? "warning" : "success"](parts.join(" · "));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "שגיאה במילוי האוטומטי.");
+    }
   }
 
   function handlePaintDown(day: Date, hour: number, col: string) {
@@ -358,7 +388,7 @@ export default function ShiftsPage() {
       return;
     }
     if (brush === "continue-from-here") {
-      continueFromHere(day, hour);
+      continueFromHere(day);
       return;
     }
     isPaintingRef.current = true;
