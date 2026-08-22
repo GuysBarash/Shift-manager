@@ -218,18 +218,16 @@ export default function OffTimePage() {
                   >
                     תאריך
                   </th>
-                  {roleGroups.map((group, i) => (
+                  {roleGroups.flatMap((group, i) => [
+                    i > 0 && <th key={`sp-${group.label}`} className="w-2 min-w-2" />,
                     <th
                       key={group.label}
                       colSpan={group.members.length}
-                      className={cn(
-                        "border-b border-s-2 border-s-border border-b-border/60 bg-card px-2 py-1.5 text-center text-[11px] font-semibold tracking-wide text-muted-foreground uppercase",
-                        i > 0 && "ps-[16px]"
-                      )}
+                      className="border-b border-b-border/60 bg-card px-2 py-1.5 text-center text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
                     >
                       {group.label}
-                    </th>
-                  ))}
+                    </th>,
+                  ])}
                 </tr>
               )}
               <tr>
@@ -238,20 +236,18 @@ export default function OffTimePage() {
                     תאריך
                   </th>
                 )}
-                {visibleProfiles.map((p) => {
+                {visibleProfiles.flatMap((p) => {
                   const color = colorAssignments.get(p.id);
-                  return (
+                  return [
+                    groupStartIds.has(p.id) && <th key={`sp-${p.id}`} className="w-2 min-w-2" />,
                     <th
                       key={p.id}
-                      className={cn(
-                        "min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text",
-                        groupStartIds.has(p.id) && "border-s-2 border-s-border ps-[16px]"
-                      )}
+                      className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
                       style={{ color: color?.hex }}
                     >
                       {p.full_name || "?"}
-                    </th>
-                  );
+                    </th>,
+                  ];
                 })}
                 {!viewAll && (
                   <th className="min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide text-muted-foreground uppercase">
@@ -280,16 +276,16 @@ export default function OffTimePage() {
                       <div className="text-[10px]">{formatDDMMYYYY(day)}</div>
                       {isToday && <div className="text-[9px] text-primary glow-text">היום</div>}
                     </td>
-                    {visibleProfiles.map((p) => {
+                    {visibleProfiles.flatMap((p) => {
                       const off = isOnTimeOff(timeOffIndex, p.id, iso);
                       const color = colorAssignments.get(p.id);
-                      return (
+                      return [
+                        groupStartIds.has(p.id) && <td key={`sp-${p.id}`} className="w-2 min-w-2" />,
                         <td
                           key={p.id}
                           className={cn(
                             "border-b border-s border-border/60 px-2 py-1.5 text-center",
-                            (isShabbat || holiday) && "bg-secondary/20",
-                            groupStartIds.has(p.id) && "ps-[16px]"
+                            (isShabbat || holiday) && "bg-secondary/20"
                           )}
                           style={
                             off
@@ -306,8 +302,8 @@ export default function OffTimePage() {
                               style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
                             />
                           )}
-                        </td>
-                      );
+                        </td>,
+                      ];
                     })}
                     {!viewAll && (
                       <td
