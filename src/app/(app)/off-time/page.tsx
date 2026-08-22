@@ -17,6 +17,7 @@ import {
   isOnTimeOff,
   isSambatz as selectIsSambatz,
   officerProfiles as selectOfficers,
+  ROLE_GROUPS,
   sambatzProfiles as selectSambatz,
   TIME_OFF_COLOR,
 } from "@/lib/roster";
@@ -58,8 +59,14 @@ export default function OffTimePage() {
   const RANGE_DAYS = useMemo(() => scheduleRangeDays(rangeStart), [rangeStart]);
   const days = useMemo(() => buildDateRange(rangeStart, RANGE_DAYS), [rangeStart, RANGE_DAYS]);
 
+  // פיקוד (מפקד מכלול / ס.מפקד מכלול) doesn't get an off-time column at all
+  // here — command staff, not part of the rotation this page tracks.
+  const pikudRoles = useMemo(() => ROLE_GROUPS.find((g) => g.label === "פיקוד")?.roles ?? [], []);
   const sambatzProfiles = useMemo(() => selectSambatz(profiles), [profiles]);
-  const officerProfiles = useMemo(() => selectOfficers(profiles), [profiles]);
+  const officerProfiles = useMemo(
+    () => selectOfficers(profiles).filter((p) => !pikudRoles.includes(p.role ?? "")),
+    [profiles, pikudRoles]
+  );
   const groupProfiles = effectiveMode === "sambatz" ? sambatzProfiles : officerProfiles;
   const groupLabel = effectiveMode === "sambatz" ? "סמבצים" : "קצינים";
 
