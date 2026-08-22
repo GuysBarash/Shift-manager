@@ -51,9 +51,12 @@ export function NavBar() {
             to the image's own large intrinsic size and inflates the row).
             It's pinned to the visual left (inset-inline-end lands there
             under dir="rtl", the conventional top-left corner regardless of
-            text direction). The column gets pe-32 so its content never
-            renders underneath the logo on narrow screens. */}
-        <div className="flex flex-col justify-center gap-2 pe-32">
+            text direction), capped at max-h-24 so it can't spiral upward on
+            narrow screens (nav wraps -> column taller -> logo taller ->
+            even less width left for nav...). The column reserves pe-28,
+            comfortably wider than that capped logo, so its content never
+            renders underneath it. */}
+        <div className="flex flex-col justify-center gap-2 pe-28">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -88,7 +91,7 @@ export function NavBar() {
           </div>
         </div>
         <Link href="/" className="absolute inset-y-0 end-4 flex items-center">
-          <Image src={logo} alt="מנהל משמרות" priority className="h-full w-auto" />
+          <Image src={logo} alt="מנהל משמרות" priority className="h-full max-h-24 w-auto" />
         </Link>
       </div>
     </header>
