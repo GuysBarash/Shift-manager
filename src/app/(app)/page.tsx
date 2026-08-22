@@ -415,115 +415,110 @@ export default function ShiftsPage() {
           />
 
           <div className="max-h-[68vh] flex-1 overflow-auto rounded-md border border-border/60 glow-border md:max-h-[75vh]">
-            <div className="flex items-start">
-              <table className="shrink-0 border-collapse text-sm select-none">
-                <thead className="sticky top-0 z-20 bg-card">
-                  <tr>
-                    <th className="sticky start-0 z-30 h-9 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                      תאריך
+            {/* One table, not two side by side — the extended per-person
+                columns are appended to the SAME <tr> as the hour/shift cells
+                (via FragmentDay's renderExtraCells) instead of living in a
+                second independent <table>. Two separate tables can never be
+                guaranteed pixel-identical row heights (sub-pixel rounding
+                differences between them compound over hundreds of rows,
+                visibly drifting by the bottom of the range) — one table
+                can't drift from itself. */}
+            <table className="border-collapse text-sm select-none">
+              <thead className="sticky top-0 z-20 bg-card">
+                <tr>
+                  <th className="sticky start-0 z-30 h-9 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    תאריך
+                  </th>
+                  <th className="sticky start-14 z-30 h-9 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                    שעה
+                  </th>
+                  {SHIFT_COLUMNS.map((col) => (
+                    <th
+                      key={col}
+                      className="h-9 min-w-32 truncate border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
+                    >
+                      {col}
                     </th>
-                    <th className="sticky start-14 z-30 h-9 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                      שעה
-                    </th>
-                    {SHIFT_COLUMNS.map((col) => (
-                      <th
-                        key={col}
-                        className="h-9 min-w-32 truncate border-b border-s border-border/60 bg-card px-3 py-2 text-start font-medium tracking-wide text-primary uppercase glow-text"
-                      >
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {days.map((day) => {
-                    const iso = toISODate(day);
-                    const dayGrid = buildDayGrid(shiftsByDay.get(iso) ?? [], SHIFT_COLUMNS);
-                    return (
-                      <FragmentDay
-                        key={iso}
-                        iso={iso}
-                        day={day}
-                        dayGrid={dayGrid}
-                        columns={SHIFT_COLUMNS}
-                        isToday={iso === todayIso}
-                        currentHour={currentHour}
-                        profileById={profileById}
-                        colorAssignments={colorAssignments}
-                        userId={userId}
-                        brushActive={!!brush}
-                        onPaintDown={(hour, col) => handlePaintDown(day, hour, col)}
-                        onPaintEnter={(hour, col) => handlePaintEnter(day, hour, col)}
-                      />
-                    );
-                  })}
-                </tbody>
-              </table>
-
-              {extended && sambatzProfiles.length > 0 && (
-                <table className="shrink-0 border-collapse text-sm">
-                  <thead className="sticky top-0 z-20 bg-card">
-                    <tr>
-                      {sambatzProfiles.map((p) => {
-                        const color = colorAssignments.get(p.id);
-                        return (
-                          <th
-                            key={p.id}
-                            className="h-9 min-w-24 truncate border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
-                            style={{ color: color?.hex }}
-                          >
-                            {p.full_name || "?"}
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {days.map((day) => {
-                      const iso = toISODate(day);
-                      const personGrid = buildPersonHourGrid(
-                        shiftsByDay.get(iso) ?? [],
-                        sambatzProfiles.map((p) => p.id)
+                  ))}
+                  {extended &&
+                    sambatzProfiles.map((p) => {
+                      const color = colorAssignments.get(p.id);
+                      return (
+                        <th
+                          key={p.id}
+                          className="h-9 min-w-24 truncate border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text"
+                          style={{ color: color?.hex }}
+                        >
+                          {p.full_name || "?"}
+                        </th>
                       );
-                      return personGrid.map((row, hour) => (
-                        <tr key={`${iso}-people-${hour}`}>
-                          {sambatzProfiles.map((p) => {
-                            const onShift = row[p.id];
-                            const atHome = isOnTimeOffAtHour(timeOffIndex, p.id, iso, hour);
-                            // Home but still on shift is a real scheduling
-                            // conflict (allowed, but should be unmistakable
-                            // at a glance) — stripe the two states together
-                            // instead of picking one silently.
-                            const conflict = !!onShift && atHome;
-                            const color = colorAssignments.get(p.id);
-                            const cellStyle: React.CSSProperties = conflict
-                              ? {
-                                  backgroundImage: `repeating-linear-gradient(45deg, ${color?.hex}88 0px, ${color?.hex}88 6px, ${TIME_OFF_COLOR} 6px, ${TIME_OFF_COLOR} 12px)`,
-                                  border: "2px solid var(--destructive)",
-                                  boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
-                                }
-                              : onShift
-                                ? { backgroundColor: `${color?.hex}55` }
-                                : atHome
-                                  ? { backgroundColor: TIME_OFF_COLOR }
-                                  : {};
-                            return (
-                              <td
-                                key={p.id}
-                                className="h-8 border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
-                                style={cellStyle}
-                              >
-                                {" "}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ));
                     })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+                </tr>
+              </thead>
+              <tbody>
+                {days.map((day) => {
+                  const iso = toISODate(day);
+                  const dayShifts = shiftsByDay.get(iso) ?? [];
+                  const dayGrid = buildDayGrid(dayShifts, SHIFT_COLUMNS);
+                  const personGrid = extended
+                    ? buildPersonHourGrid(dayShifts, sambatzProfiles.map((p) => p.id))
+                    : null;
+                  return (
+                    <FragmentDay
+                      key={iso}
+                      iso={iso}
+                      day={day}
+                      dayGrid={dayGrid}
+                      columns={SHIFT_COLUMNS}
+                      isToday={iso === todayIso}
+                      currentHour={currentHour}
+                      profileById={profileById}
+                      colorAssignments={colorAssignments}
+                      userId={userId}
+                      brushActive={!!brush}
+                      onPaintDown={(hour, col) => handlePaintDown(day, hour, col)}
+                      onPaintEnter={(hour, col) => handlePaintEnter(day, hour, col)}
+                      renderExtraCells={
+                        extended && personGrid
+                          ? (hour) =>
+                              sambatzProfiles.map((p) => {
+                                const onShift = personGrid[hour][p.id];
+                                const atHome = isOnTimeOffAtHour(timeOffIndex, p.id, iso, hour);
+                                // Home but still on shift is a real
+                                // scheduling conflict (allowed, but should
+                                // be unmistakable at a glance) — stripe the
+                                // two states together instead of picking
+                                // one silently.
+                                const conflict = !!onShift && atHome;
+                                const color = colorAssignments.get(p.id);
+                                const cellStyle: React.CSSProperties = conflict
+                                  ? {
+                                      backgroundImage: `repeating-linear-gradient(45deg, ${color?.hex}88 0px, ${color?.hex}88 6px, ${TIME_OFF_COLOR} 6px, ${TIME_OFF_COLOR} 12px)`,
+                                      border: "2px solid var(--destructive)",
+                                      boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                                    }
+                                  : onShift
+                                    ? { backgroundColor: `${color?.hex}55` }
+                                    : atHome
+                                      ? { backgroundColor: TIME_OFF_COLOR }
+                                      : {};
+                                return (
+                                  <td
+                                    key={p.id}
+                                    className="h-8 border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
+                                    style={cellStyle}
+                                  >
+                                    {" "}
+                                  </td>
+                                );
+                              })
+                          : undefined
+                      }
+                    />
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

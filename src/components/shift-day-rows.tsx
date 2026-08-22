@@ -15,6 +15,7 @@ export function FragmentDay({
   brushActive,
   onPaintDown,
   onPaintEnter,
+  renderExtraCells,
 }: {
   iso: string;
   day: Date;
@@ -28,6 +29,12 @@ export function FragmentDay({
   brushActive: boolean;
   onPaintDown: (hour: number, col: string) => void;
   onPaintEnter: (hour: number, col: string) => void;
+  // Lets the extended per-person view append its cells to this SAME <tr>
+  // instead of living in a second, independent <table> — two separate
+  // tables can never be guaranteed pixel-identical row heights (sub-pixel
+  // rounding differences compound over hundreds of rows), one table can't
+  // drift from itself.
+  renderExtraCells?: (hour: number) => React.ReactNode;
 }) {
   return (
     <>
@@ -107,6 +114,7 @@ export function FragmentDay({
                 </td>
               );
             })}
+            {renderExtraCells?.(hour)}
           </tr>
         );
       })}
