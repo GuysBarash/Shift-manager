@@ -7,7 +7,13 @@ import { addDays, formatDDMMYYYY, formatDow, startOfDay, toISODate } from "@/lib
 import { buildColorAssignments } from "@/lib/person-color";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { scheduleRangeDays } from "@/lib/schedule-range";
-import { buildDateRange, isOnTimeOff, buildTimeOffIndex, sambatzProfiles as selectSambatz, TIME_OFF_COLOR } from "@/lib/roster";
+import {
+  buildDateRange,
+  isOnTimeOffAtHour,
+  buildTimeOffIndex,
+  sambatzProfiles as selectSambatz,
+  TIME_OFF_COLOR,
+} from "@/lib/roster";
 import { buildDayGrid, buildPersonHourGrid } from "@/lib/shift-grid";
 import { BrushToolbar, type Brush } from "@/components/brush-toolbar";
 import { FragmentDay } from "@/components/shift-day-rows";
@@ -483,7 +489,7 @@ export default function ShiftsPage() {
                         <tr key={`${iso}-people-${hour}`}>
                           {sambatzProfiles.map((p) => {
                             const onShift = row[p.id];
-                            const atHome = isOnTimeOff(timeOffIndex, p.id, iso);
+                            const atHome = isOnTimeOffAtHour(timeOffIndex, p.id, iso, hour);
                             // Home but still on shift is a real scheduling
                             // conflict (allowed, but should be unmistakable
                             // at a glance) — stripe the two states together
@@ -504,7 +510,7 @@ export default function ShiftsPage() {
                             return (
                               <td
                                 key={p.id}
-                                className="border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
+                                className="h-8 border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
                                 style={cellStyle}
                               >
                                 {" "}

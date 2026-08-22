@@ -40,6 +40,31 @@ export function isOnTimeOff(index: Map<string, TimeOff[]>, personId: string, dat
   return list.some((t) => t.start_date <= dateIso && dateIso <= t.end_date);
 }
 
+// Rotations turn over around 10:00, not midnight — someone leaving base is
+// still around (not "away") until 10:00 on their first day off, and someone
+// coming back is already around (not "away") from 10:00 on their last day
+// off. Only applies to the two edges of a real multi-day stretch; a lone
+// single-day record has no distinct leave/return edge to carve out, so it
+// stays away all day.
+const HOME_TRANSITION_HOUR = 10;
+
+export function isOnTimeOffAtHour(
+  index: Map<string, TimeOff[]>,
+  personId: string,
+  dateIso: string,
+  hour: number
+): boolean {
+  const list = index.get(personId);
+  if (!list) return false;
+  return list.some((t) => {
+    if (dateIso < t.start_date || dateIso > t.end_date) return false;
+    const multiDay = t.start_date !== t.end_date;
+    if (multiDay && dateIso === t.start_date && hour < HOME_TRANSITION_HOUR) return false;
+    if (multiDay && dateIso === t.end_date && hour >= HOME_TRANSITION_HOUR) return false;
+    return true;
+  });
+}
+
 export function buildDateRange(start: Date, days: number): Date[] {
   return Array.from({ length: days }, (_, i) => addDays(start, i));
 }

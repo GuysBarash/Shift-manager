@@ -53,7 +53,7 @@ export function FragmentDay({
               </td>
             )}
             <td
-              className={`sticky start-14 z-10 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
+              className={`sticky start-14 z-10 h-8 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
                 isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
               }`}
             >
@@ -71,7 +71,7 @@ export function FragmentDay({
                   key={col}
                   onMouseDown={() => onPaintDown(hour, col)}
                   onMouseEnter={() => onPaintEnter(hour, col)}
-                  className={`border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
+                  className={`h-8 overflow-hidden border-b border-s border-border/60 px-3 py-1.5 transition-colors hover:brightness-125 ${
                     brushActive ? "cursor-crosshair" : "cursor-default"
                   } ${isNowRow && !shift ? "bg-primary/10" : ""} ${
                     isMine ? "ring-1 ring-inset ring-primary/50" : ""
@@ -86,8 +86,12 @@ export function FragmentDay({
                   }
                 >
                   {shift && assignee ? (
+                    // block+truncate instead of letting a long two-word name
+                    // wrap to a second line — a wrapped row would be taller
+                    // than the same row in the extended per-person table
+                    // next to it, throwing the two tables out of alignment.
                     <span
-                      className="font-medium"
+                      className="block truncate font-medium"
                       style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
                     >
                       {assignee.full_name}
