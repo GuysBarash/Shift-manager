@@ -218,11 +218,14 @@ export default function OffTimePage() {
                   >
                     תאריך
                   </th>
-                  {roleGroups.map((group) => (
+                  {roleGroups.map((group, i) => (
                     <th
                       key={group.label}
                       colSpan={group.members.length}
-                      className="border-b border-s-2 border-s-border border-b-border/60 bg-card px-2 py-1.5 text-center text-[11px] font-semibold tracking-wide text-muted-foreground uppercase"
+                      className={cn(
+                        "border-b border-s-2 border-s-border border-b-border/60 bg-card px-2 py-1.5 text-center text-[11px] font-semibold tracking-wide text-muted-foreground uppercase",
+                        i > 0 && "ps-[8px]"
+                      )}
                     >
                       {group.label}
                     </th>
@@ -242,7 +245,7 @@ export default function OffTimePage() {
                       key={p.id}
                       className={cn(
                         "min-w-24 border-b border-s border-border/60 bg-card px-2 py-2 text-center font-medium tracking-wide uppercase glow-text",
-                        groupStartIds.has(p.id) && "border-s-2 border-s-border"
+                        groupStartIds.has(p.id) && "border-s-2 border-s-border ps-[8px]"
                       )}
                       style={{ color: color?.hex }}
                     >
@@ -283,9 +286,11 @@ export default function OffTimePage() {
                       return (
                         <td
                           key={p.id}
-                          className={`border-b border-s border-border/60 px-2 py-1.5 text-center ${
-                            isShabbat || holiday ? "bg-secondary/20" : ""
-                          }`}
+                          className={cn(
+                            "border-b border-s border-border/60 px-2 py-1.5 text-center",
+                            (isShabbat || holiday) && "bg-secondary/20",
+                            groupStartIds.has(p.id) && "ps-[8px]"
+                          )}
                           style={
                             off
                               ? { backgroundColor: TIME_OFF_COLOR }

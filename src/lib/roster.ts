@@ -45,15 +45,15 @@ export function buildDateRange(start: Date, days: number): Date[] {
 }
 
 // The roster's real command structure, in the order it appears in the
-// source roster spreadsheet. "מבצעים" is included alongside 'סמב"צ' because
-// older seeded rows use that label for the same category — both mean the
-// same group of people.
+// source roster spreadsheet. Both role spellings ('סמב"צ' and "מבצעים") are
+// matched under the "מבצעים" category label — they mean the same group of
+// people, just seeded with different label text at different times.
 export const ROLE_GROUPS: { label: string; roles: string[] }[] = [
   { label: "פיקוד", roles: ["מפקד מכלול", "ס.מפקד מכלול"] },
   { label: 'קמב"צ', roles: ['קמב"צ'] },
   { label: "קש״א", roles: ["קש״א"] },
   { label: "קמן", roles: ["קמן"] },
-  { label: 'סמב"צ', roles: ['סמב"צ', "מבצעים"] },
+  { label: "מבצעים", roles: ['סמב"צ', "מבצעים"] },
   { label: "אש", roles: ["אש"] },
   { label: "מודיעין", roles: ["מודיעין"] },
 ];
