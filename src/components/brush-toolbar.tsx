@@ -4,9 +4,9 @@ import { useState } from "react";
 import type { Profile } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { ChevronDown, Eraser } from "lucide-react";
+import { ChevronDown, Eraser, Scissors, Wand2 } from "lucide-react";
 
-export type Brush = "erase" | string | null;
+export type Brush = "erase" | "delete-from-here" | "continue-from-here" | string | null;
 
 export function BrushToolbar({
   profiles,
@@ -48,6 +48,41 @@ export function BrushToolbar({
         <Eraser className="size-4" />
         מחיקה
       </button>
+    );
+  }
+
+  // Not per-cell paints like everything else here — clicking a cell with one
+  // of these selected acts on that whole point-forward range in one shot
+  // (see handlePaintDown in the Shifts page, which only fires these on the
+  // initial click, never on drag).
+  function ToolButtons() {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => onSelect(brush === "delete-from-here" ? null : "delete-from-here")}
+          className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors ${
+            brush === "delete-from-here"
+              ? "bg-destructive/15 text-destructive ring-1 ring-destructive/60"
+              : "text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          <Scissors className="size-4" />
+          מחק מכאן
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelect(brush === "continue-from-here" ? null : "continue-from-here")}
+          className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-start text-xs whitespace-nowrap transition-colors ${
+            brush === "continue-from-here"
+              ? "bg-primary/15 text-primary ring-1 ring-primary/60"
+              : "text-muted-foreground hover:bg-accent"
+          }`}
+        >
+          <Wand2 className="size-4" />
+          השלם מכאן
+        </button>
+      </>
     );
   }
 
@@ -119,6 +154,16 @@ export function BrushToolbar({
                 <Eraser className="size-3.5 text-destructive" />
                 <span className="text-destructive">מחיקה</span>
               </>
+            ) : brush === "delete-from-here" ? (
+              <>
+                <Scissors className="size-3.5 text-destructive" />
+                <span className="text-destructive">מחק מכאן</span>
+              </>
+            ) : brush === "continue-from-here" ? (
+              <>
+                <Wand2 className="size-3.5 text-primary" />
+                <span className="text-primary">השלם מכאן</span>
+              </>
             ) : selectedProfile ? (
               <>
                 <span
@@ -145,6 +190,7 @@ export function BrushToolbar({
             </div>
             <div className="flex flex-wrap gap-1">
               <EraseButton />
+              <ToolButtons />
               <PersonButtons />
             </div>
           </div>
@@ -156,6 +202,7 @@ export function BrushToolbar({
         <EditModeControls />
         <div className="my-1 h-px bg-border/60" />
         <EraseButton />
+        <ToolButtons />
         <div className="my-1 h-px bg-border/60" />
         <PersonButtons />
       </div>

@@ -309,8 +309,52 @@ export default function ShiftsPage() {
     }
   }
 
+  // Groundwork for the auto-shift builder: "delete from here" wipes both
+  // columns from the clicked point through the end of the visible range in
+  // one shot, and "continue from here" is the hook where the (not yet
+  // written) auto-fill algorithm will plug in. Both are point actions, not
+  // per-cell paints — handlePaintDown only fires them on the initial click
+  // and never sets isPaintingRef, so a drag across cells doesn't re-trigger
+  // them.
+  function deleteFromHere(day: Date, hour: number) {
+    const shiftDate = toISODate(day);
+    const hourStart = `${String(hour).padStart(2, "0")}:00:00`;
+
+    const toRemove = shiftsRef.current.filter(
+      (s) => s.shift_date > shiftDate || (s.shift_date === shiftDate && s.end_time > hourStart)
+    );
+    if (toRemove.length === 0) return;
+
+    const removeIds = new Set(toRemove.map((s) => s.id));
+    applyShifts((prev) => prev.filter((s) => !removeIds.has(s.id)));
+
+    // A shift straddling the cutoff (started before it, would have ended
+    // after it) keeps its portion before the cutoff instead of disappearing
+    // whole — same split-and-reinsert pattern paintCell uses.
+    toRemove.forEach((s) => {
+      if (s.shift_date === shiftDate && s.start_time < hourStart) {
+        createLocalPiece(s.shift_date, s.position ?? "", s.start_time, hourStart, s.assigned_to, s.notes);
+      }
+    });
+  }
+
+  // TODO: the actual auto-fill algorithm. For now this just confirms the
+  // click landed on the right cell, so the palette button and the
+  // click-to-invoke plumbing are ready for it once it exists.
+  function continueFromHere(day: Date, hour: number) {
+    toast.info(`מילוי אוטומטי החל מ-${String(hour).padStart(2, "0")}:00, ${formatDDMMYYYY(day)} — טרם מומש.`);
+  }
+
   function handlePaintDown(day: Date, hour: number, col: string) {
     if (!brush || !editMode) return;
+    if (brush === "delete-from-here") {
+      deleteFromHere(day, hour);
+      return;
+    }
+    if (brush === "continue-from-here") {
+      continueFromHere(day, hour);
+      return;
+    }
     isPaintingRef.current = true;
     paintCell(day, hour, col);
   }
