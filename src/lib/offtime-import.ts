@@ -12,6 +12,9 @@ const FIRST_DATA_ROW = 6;
 // Only an explicit 'V' means at-base — blank, 'X', or anything else means
 // at home (not-X-and-not-V is the same as X).
 const BASE_MARK = "V";
+// A row reserved for a role that hasn't been assigned to a real person yet
+// — a placeholder, not someone to import (or warn about not finding).
+const PLACEHOLDER_NAMES = new Set(["??"]);
 // Safely before any realistic "today" the app will be viewed on, so the
 // pre-term leave range always covers "now" regardless of when the term
 // this workbook describes actually starts.
@@ -57,7 +60,7 @@ export function extractOffTime(ws: XLSX.WorkSheet): OffTimeExtraction {
   const people = new Map<string, OffTimeRange[]>();
   for (let r = FIRST_DATA_ROW; r <= maxRow; r++) {
     const name = cellValue(ws, r, nameCol);
-    if (typeof name !== "string" || !name.trim()) continue;
+    if (typeof name !== "string" || !name.trim() || PLACEHOLDER_NAMES.has(name.trim())) continue;
 
     const homeDates: string[] = [];
     for (const { col, iso } of dateCols) {
