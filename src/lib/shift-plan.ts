@@ -43,17 +43,10 @@ export type Slot = {
   column: string;
   dateIso: string;      // the day the slot STARTS on
   startTime: string;    // "HH:MM:SS"
-};
-
-/**
- * A work block: "6 work, 6 rest, 6 work". Two shifts 12h apart in the SAME
- * column, which is what the rotation is built from. A block of one slot is an
- * edge break - the start or end of a chain, where there is nothing to pair to.
- */
-export type Block = {
-  slots: Slot[];
-  startMs: number;
-  endMs: number;
+  /** Actual length. Normally shiftHours; 1 less or 1 more while realigning. */
+  lengthH: number;
+  /** Hours off the nominal length: -1 shortened, 0 normal, +1 lengthened. */
+  adjusted: number;
 };
 
 export type Assignment = {
@@ -82,7 +75,7 @@ export type Anchor = {
 
 export type PlanOptions = {
   shiftHours?: number;      // default 6
-  staggerHours?: number;    // default 3 — a new person starts every 3h
+  staggerHours?: number;    // default shiftHours/2 — two columns, one changeover per half shift
   columns?: string[];       // default the app's two slots
   arriveHour?: number;      // default 10 — expected at base by
   departHour?: number;      // default 10 — leave the morning after the last day
@@ -90,12 +83,22 @@ export type PlanOptions = {
   toDate?: string | null;
   /** Only these people take shifts (the app passes sambatz profiles). */
   include?: string[];
-  /** Shifts taken back-to-back before the long rest. Default 2 (the pair). */
-  pairSize?: number;
   /**
-   * HARD floor on the gap between one block and the next, in hours. Default
-   * shiftHours. Nobody is ever scheduled closer than this - see the note in
-   * planShifts. A slot goes unfilled rather than break it.
+   * Where each column's chain resumes, as epoch ms. Used when replanning from
+   * a date: the shift already in the book may end off-grid, and the new plan
+   * has to pick up from there and walk back onto the grid.
+   */
+  resumeAt?: Record<string, number>;
+  /**
+   * Rest threshold in hours. A gap of at least this counts as REST; anything
+   * less is a "no-rest" event and is minimised. Default 1.5 shifts - 9h on
+   * a 6h shift, 12h on an 8h shift.
+   */
+  restThresholdH?: number;
+  /**
+   * HARD floor on the gap between two shifts, in hours. Default shiftHours:
+   * half a shift counts the same as back to back, so a full shift off is the
+   * shortest legal gap. A slot goes unfilled rather than break it.
    */
   minRestH?: number;
 };
@@ -122,16 +125,27 @@ export type PlanResult = {
   gaps: RestGap[];
   load: { person: string; shifts: number; hours: number }[];
   worstRestH: number | null;
-  /** Every gap that missed the cycle pattern, with what was wanted. */
-  patternDeviations: PatternNote[];
+  /** Every gap below the rest threshold: shift, off, shift with no real break. */
+  noRest: NoRestEvent[];
+  /** Shifts run short or long to walk the column back onto the grid. */
+  adjusted: AdjustedShift[];
   elapsedMs: number;
 };
 
 /**
- * One gap that did not match the rotation. `wantedH` is what the cycle called
- * for at that moment - `shiftHours` mid-pair, the long rest after it.
+ * A gap that did not reach the rest threshold - "shift on, shift off, shift
+ * on". Not forbidden, but minimised: `gotH` is the actual break, `wantedH` the
+ * threshold it fell short of.
  */
-export type PatternNote = {
+/** A shift given an hour less or more so its column returns to the grid. */
+export type AdjustedShift = {
+  person: string;
+  dateIso: string;
+  startTime: string;
+  lengthH: number;
+};
+
+export type NoRestEvent = {
   person: string;
   dateIso: string;
   startTime: string;
@@ -142,12 +156,18 @@ export type PatternNote = {
 export const DEFAULT_COLUMNS = ["משמרת א׳", "משמרת ב׳"];
 const HOUR = 3600_000;
 
-// Scoring weights. Pattern adherence leads mid-stay; travel rest leads at the
-// edges of a stay, where there is no previous shift to pattern against.
-const W_PATTERN = 40;
-const W_TRAVEL = 10;
+// Scoring weights, in the priority order the rules were given:
+//   A  avoid no-rest        - dominates everything
+//   B  rest before leaving  - as much as possible
+//   C  rest after arriving  - as much as possible
+// Load balance sits underneath as a tiebreak, so the rotation stays even
+// without ever outvoting a no-rest event.
+const W_NOREST = 400;      // A: penalty per no-rest, scaled by how short it was
+const W_RESTED = 12;       // A: prefer the most-rested candidate (saturates)
+const W_TRAVEL = 10;       // B and C
 const W_LOAD = 15;
-const W_SPREAD = 4;
+const W_SPREAD = 6;        // spread unavoidable no-rest across people
+const W_REUSE = 60;        // a 5h/7h shift should not land on the same person twice
 
 // --------------------------------------------------------------------------
 // Small date helpers
@@ -295,14 +315,23 @@ export function rosterRange(ws: XLSX.WorkSheet): { start: string; end: string } 
 // --------------------------------------------------------------------------
 
 /**
- * One slot every `staggerHours`, each `shiftHours` long. With 6 and 3 that is
- * eight slots a day and two people on duty at any moment, which is why the app
- * has exactly two columns. Columns cycle so each holds a contiguous chain.
+ * Build the slot chain for each column.
+ *
+ * The start times are a fixed grid: with a 6h shift, 00 03 06 09 12 15 18 21;
+ * with an 8h shift, 00 04 08 12 16 20. Column A sits on the even multiples of
+ * the shift, column B is offset by half a shift, which is what puts two people
+ * on duty with a half-shift overlap.
+ *
+ * REALIGNMENT. A column is a contiguous chain, so anything that ends off-grid
+ * - an anchored shift at an odd hour, or a replan boundary - would otherwise
+ * push every later slot off with it. Instead the next slot gives back an hour
+ * (5h instead of 6h) or takes one (7h), walking the chain back onto the grid
+ * one hour at a time. Shortening is preferred, so a boundary exactly half a
+ * shift out is treated as late and caught up rather than stretched.
  */
 export function buildSlots(startIso: string, endIso: string, opts: PlanOptions = {}): Slot[] {
   const shiftHours = opts.shiftHours ?? 6;
-  const staggerHours = opts.staggerHours ?? 3;
-  const perDay = Math.round(24 / staggerHours);
+  const staggerHours = opts.staggerHours ?? shiftHours / 2;
   const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
   const columns = opts.columns ?? DEFAULT_COLUMNS;
   if (columns.length < lanes) {
@@ -311,79 +340,52 @@ export function buildSlots(startIso: string, endIso: string, opts: PlanOptions =
     );
   }
 
+  // Local wall-clock hour. Never derive this from a millisecond offset: Israel
+  // puts the clocks back on the last Sunday of October, so that day has 25
+  // hours and a fixed offset lands an hour early for the rest of it.
+  const hourOf = (ms: number): number => {
+    const d = new Date(ms);
+    return d.getHours() + d.getMinutes() / 60;
+  };
+
+  const limit = atHour(addDaysIso(endIso, 1), 0);
   const slots: Slot[] = [];
-  let day = startIso;
-  let k = 0;
-  while (day <= endIso) {
-    for (let i = 0; i < perDay; i++) {
-      // Built from LOCAL calendar hours, never midnight + n milliseconds.
-      // Israel's clocks go back on the last Sunday of October, so that day has
-      // 25 hours and a fixed-ms offset lands an hour early for the rest of it.
-      // src/lib/dates.ts carries the same warning - this broke once already.
-      const startMs = atHour(day, i * staggerHours);
-      const endMs = atHour(day, i * staggerHours + shiftHours);
+
+  for (let lane = 0; lane < lanes; lane++) {
+    const column = columns[lane];
+    const offset = lane * staggerHours;
+    let cursor = opts.resumeAt?.[column] ?? atHour(startIso, offset);
+
+    while (cursor < limit) {
+      // How far past a grid point we are. Ties go to "late", so the chain is
+      // pulled back with a short shift rather than pushed out with a long one.
+      const rel = (((hourOf(cursor) - offset) % shiftHours) + shiftHours) % shiftHours;
+      const drift = rel <= shiftHours / 2 ? rel : rel - shiftHours;
+
+      let lengthH = shiftHours;
+      if (drift > 0) lengthH = shiftHours - Math.min(1, drift);
+      else if (drift < 0) lengthH = shiftHours + Math.min(1, -drift);
+
+      const dateIso = isoOf(new Date(cursor));
+      const endMs = atHour(dateIso, hourOf(cursor) + lengthH);
       slots.push({
-        startMs,
+        startMs: cursor,
         endMs,
-        column: columns[k % lanes],
-        dateIso: day,
-        startTime: hhmmss(startMs),
+        column,
+        dateIso,
+        startTime: hhmmss(cursor),
+        lengthH,
+        adjusted: lengthH - shiftHours,
       });
-      k++;
+      cursor = endMs;
     }
-    day = addDaysIso(day, 1);
   }
-  return slots;
+  return slots.sort((a, b) => a.startMs - b.startMs || a.column.localeCompare(b.column));
 }
 
 // --------------------------------------------------------------------------
 // 3. Planning
 // --------------------------------------------------------------------------
-
-/**
- * Pair the slots into work blocks.
- *
- * Inside one column the starts are shiftHours apart (col A 00,06,12,18), so
- * two shifts 12h apart are slot i and slot i+2. That splits each column into
- * two independent chains - even index and odd index - and each chain is paired
- * end to end. A chain of odd length leaves a single-slot block at its tail.
- *
- * NOTE: pairing FIRST is what makes the 6h intra-pair rest exact. Scoring it
- * per-slot instead lets the greedy wander, which is what produced back-to-back
- * shifts with 0h between them.
- */
-export function buildBlocks(slots: Slot[], loose: Set<string> = new Set()): Block[] {
-  const byColumn = new Map<string, Slot[]>();
-  for (const s of slots) {
-    const list = byColumn.get(s.column) ?? [];
-    list.push(s);
-    byColumn.set(s.column, list);
-  }
-
-  const blocks: Block[] = [];
-  for (const list of byColumn.values()) {
-    list.sort((a, b) => a.startMs - b.startMs);
-    for (const parity of [0, 1]) {
-      const chain = list.filter((_, i) => i % 2 === parity);
-      let i = 0;
-      while (i < chain.length) {
-        const a = chain[i];
-        const b = chain[i + 1];
-        const keyA = `${a.dateIso}|${a.startTime}|${a.column}`;
-        const keyB = b ? `${b.dateIso}|${b.startTime}|${b.column}` : "";
-        // An anchored slot owns itself, so never fold it into a pair.
-        if (b && !loose.has(keyA) && !loose.has(keyB)) {
-          blocks.push({ slots: [a, b], startMs: a.startMs, endMs: b.endMs });
-          i += 2;
-        } else {
-          blocks.push({ slots: [a], startMs: a.startMs, endMs: a.endMs });
-          i += 1;
-        }
-      }
-    }
-  }
-  return blocks.sort((a, b) => a.startMs - b.startMs);
-}
 
 type Busy = { start: number; end: number };
 
@@ -392,6 +394,13 @@ function windowFor(person: Person, slot: Slot): PresenceWindow | null {
     if (slot.startMs >= w.from && slot.endMs <= w.until) return w;
   }
   return null;
+}
+
+/** How many of the pool are at base for this slot. */
+function presentAt(people: Person[], slot: Slot): number {
+  let n = 0;
+  for (const p of people) if (windowFor(p, slot)) n++;
+  return n;
 }
 
 function overlaps(busy: Busy[], slot: Slot): boolean {
@@ -418,9 +427,13 @@ export function planShifts(
 ): PlanResult {
   const t0 = Date.now();
   const shiftHours = opts.shiftHours ?? 6;
-  const staggerHours = opts.staggerHours ?? 3;
-  const pairSize = opts.pairSize ?? 2;
+  const staggerHours = opts.staggerHours ?? shiftHours / 2;
+  // REST is one and a half shifts off. One shift off is "no-rest" - allowed
+  // but minimised. Half a shift counts the same as back to back and is
+  // forbidden, so the hard floor is a full shift.
+  const restThresholdH = opts.restThresholdH ?? 1.5 * shiftHours;
   const minRestH = opts.minRestH ?? shiftHours;
+  const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
   const boundary = opts.fromDate ? atHour(opts.fromDate, 0) : -Infinity;
 
   const byName = new Map(people.map((p) => [p.name, p] as const));
@@ -461,114 +474,98 @@ export function planShifts(
     hours.set(a.person, (hours.get(a.person) ?? 0) + shiftHours);
   }
 
-  // -- rotation shape ------------------------------------------------------
+  // -- the rest model -------------------------------------------------------
   //
-  // Slots are paired into blocks of "6 work, 6 rest, 6 work" first, so the 6h
-  // intra-pair rest is exact by construction. What is left to choose is WHO
-  // takes each block, and the gap between one person's blocks - the long rest.
+  // A gap of restThresholdH or more is REST. Less than that is a "no-rest"
+  // event - shift on, shift off, shift on - allowed but minimised. Genuinely
+  // back to back is forbidden outright by minRestH.
   //
-  // With `lanes` on duty at once and N people present, the cycle is
-  //   pairSize * shiftHours * N / lanes
-  // and the long rest is whatever is left after the pair and its inner gap.
-  // N is counted per block because people arrive and leave.
-  const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
+  // With `lanes` on duty and N people present, each person starts a shift
+  // every staggerHours * N hours, so the natural gap is
+  //     staggerHours * N - shiftHours
+  // = 12h at N=6 and 18h at N=8, both at or above the threshold. So a perfectly
+  // even rotation has NO no-rest events at all, and every one that appears
+  // comes from an arrival, a departure or an anchor - not from the rotation.
+  //
+  // NOTE: an earlier version targeted "6 work, 6 rest, 6 work, long rest" and
+  // built the plan out of paired blocks. That 6h inner gap is a no-rest event
+  // under this definition, so the pairing is gone: the rotation now falls out
+  // of always picking the most-rested candidate.
 
-  function longRestFor(present: number): number {
-    if (present <= 0) return shiftHours;
-    const cycleH = (pairSize * shiftHours * present) / lanes;
-    return Math.max(shiftHours, cycleH - (2 * pairSize - 1) * shiftHours);
-  }
-
-  // -- greedy over blocks, in time order -----------------------------------
   const assignments: Assignment[] = [];
   const unfilled: Slot[] = [];
-  const patternDeviations: PatternNote[] = [];
-  // Pattern misses already carried, so leftovers spread instead of always
-  // landing on the same person.
+  const noRest: NoRestEvent[] = [];
+  const ordered = [...slots].sort((a, b) => a.startMs - b.startMs);
+
+  // no-rest events already carried, so unavoidable ones spread around instead
+  // of always landing on the same person
   const misses = new Map<string, number>(people.map((p) => [p.name, 0] as const));
+  // Realignment shifts already carried. Shortening is preferred over
+  // lengthening, but either way one person should not absorb two of them.
+  const adjustedCount = new Map<string, number>(people.map((p) => [p.name, 0] as const));
+  const adjusted: AdjustedShift[] = [];
 
-  const blocks = buildBlocks(slots, new Set(anchorAt.keys()));
-
-  for (const block of blocks) {
-    const first = block.slots[0];
-    const key = `${first.dateIso}|${first.startTime}|${first.column}`;
-    const anchor = block.slots.length === 1 ? anchorAt.get(key) : undefined;
+  for (const slot of ordered) {
+    const key = `${slot.dateIso}|${slot.startTime}|${slot.column}`;
+    const anchor = anchorAt.get(key);
     if (anchor) {
-      assignments.push({ slot: first, person: anchor.person, anchored: true });
+      assignments.push({ slot, person: anchor.person, anchored: true });
       continue;
     }
-    if (block.startMs < boundary) {
+    if (slot.startMs < boundary) {
       // before the replan boundary and not anchored: leave it as it is
       continue;
     }
-
-    let present = 0;
-    for (const p of people) if (block.slots.every((sl) => windowFor(p, sl))) present++;
-    const longRestH = longRestFor(present);
 
     let best: string | null = null;
     let bestScore = -Infinity;
     let bestGap = Number.POSITIVE_INFINITY;
 
     for (const p of people) {
-      // Must be at base for EVERY slot in the block, and free for all of them.
-      const w = windowFor(p, block.slots[0]);
+      const w = windowFor(p, slot);
       if (!w) continue;
-      if (!block.slots.every((sl) => windowFor(p, sl))) continue;
       const list = busy.get(p.name)!;
-      if (block.slots.some((sl) => overlaps(list, sl))) continue;
+      if (overlaps(list, slot)) continue;
 
-      const done = list
-        .filter((b) => b.start >= w.from && b.end <= w.until && b.end <= block.startMs)
-        .sort((a, b) => a.start - b.start);
-      const firstOfStay = done.length === 0 && !list.some((b) => b.start >= w.from && b.end <= w.until);
-
-      // Rest as the sliding window after their last shift.
-      const gapH = done.length
-        ? (block.startMs - done[done.length - 1].end) / HOUR
-        : Number.POSITIVE_INFINITY;
-
-      // Rest is scored as "have they had their long rest yet", saturating at the
-      // target. Overshooting must NOT be penalised: an earlier version scored
-      // distance from the target in both directions, so somebody rested 30h
-      // scored barely above somebody rested 0h and the load term decided it -
-      // which is what produced blocks taken back to back.
-      // HARD RULE: never back to back.
-      //
-      // Two blocks in the same column interleave perfectly - (03:00,15:00) and
-      // (09:00,21:00) - so one person holding both works 03:00 straight
-      // through to 03:00 the next day. Scoring alone did not stop it: the
-      // travel term swings 180 while the pattern term swings 60, so protecting
-      // somebody's departure rest outvoted a 24h marathon. It is a filter now,
-      // not a penalty. If that leaves nobody, the slot is reported unfilled.
-      if (Number.isFinite(gapH) && gapH < minRestH) continue;
-
-      let patternFit = 1;
-      if (Number.isFinite(gapH)) {
-        patternFit = Math.min(gapH, longRestH) / longRestH;
-        if (gapH < longRestH) patternFit -= 0.5 * (1 - gapH / longRestH);
+      // Rest is the sliding window after their previous shift in this stay.
+      let prevEnd = Number.NEGATIVE_INFINITY;
+      let hasPrev = false;
+      for (const b of list) {
+        if (b.start >= w.from && b.end <= w.until && b.end <= slot.startMs) {
+          hasPrev = true;
+          if (b.end > prevEnd) prevEnd = b.end;
+        }
       }
+      const gapH = hasPrev ? (slot.startMs - prevEnd) / HOUR : Number.POSITIVE_INFINITY;
 
-      const sinceArrival = (block.startMs - w.from) / HOUR;
-      const untilDeparture = (w.until - block.endMs) / HOUR;
+      // HARD: never back to back.
+      if (hasPrev && gapH < minRestH) continue;
+
+      // A: how far short of a real rest this would be, 0 when it is fine.
+      const shortBy = hasPrev ? Math.max(0, restThresholdH - gapH) : 0;
+      const rested = Math.min(hasPrev ? gapH : restThresholdH, restThresholdH);
+
+      // B and C: rest either side of travel. Infinite mid-stay, so it only
+      // bites at the edges. Capped - past a day more is not worth trading for.
+      const firstOfStay = !list.some((b) => b.start >= w.from && b.end <= w.until);
+      const sinceArrival = (slot.startMs - w.from) / HOUR;
+      const untilDeparture = (w.until - slot.endMs) / HOUR;
       const bindingRest = Math.min(
         firstOfStay ? sinceArrival : Number.POSITIVE_INFINITY,
         untilDeparture
       );
-      // Load as a RATIO of what this pool size implies (48 h/day shared by N
-      // people at 2 lanes), not raw hours. Raw hours/day sits near 8 and the
-      // weighted term then swamps the pattern term, which is what produced
-      // blocks taken back to back with 0h between them.
+
       const perDay = (hours.get(p.name) ?? 0) / daysAtBase.get(p.name)!;
-      const expectedPerDay = (24 * lanes) / Math.max(1, present);
+      const expectedPerDay = (24 * lanes) / Math.max(1, presentAt(people, slot));
       const loadRatio = perDay / Math.max(1, expectedPerDay);
-      const wouldMiss = Number.isFinite(gapH) && Math.abs(gapH - longRestH) > 1;
 
       const score =
-        W_PATTERN * patternFit +
+        -W_NOREST * (shortBy / restThresholdH) +
+        W_RESTED * rested +
         W_TRAVEL * Math.min(bindingRest, 18) -
         W_LOAD * loadRatio -
-        (wouldMiss ? W_SPREAD * (misses.get(p.name) ?? 0) : 0);
+        (shortBy > 0 ? W_SPREAD * (misses.get(p.name) ?? 0) : 0) -
+        (slot.adjusted !== 0 ? W_REUSE * (adjustedCount.get(p.name) ?? 0) : 0);
 
       if (score > bestScore) {
         bestScore = score;
@@ -578,29 +575,33 @@ export function planShifts(
     }
 
     if (best === null) {
-      for (const sl of block.slots) {
-        unfilled.push(sl);
-        assignments.push({ slot: sl, person: null, anchored: false });
-      }
+      unfilled.push(slot);
+      assignments.push({ slot, person: null, anchored: false });
       continue;
     }
-    if (Number.isFinite(bestGap) && Math.abs(bestGap - longRestH) > 1) {
+    if (Number.isFinite(bestGap) && bestGap < restThresholdH) {
       misses.set(best, (misses.get(best) ?? 0) + 1);
-      patternDeviations.push({
+      noRest.push({
         person: best,
-        dateIso: first.dateIso,
-        startTime: first.startTime,
+        dateIso: slot.dateIso,
+        startTime: slot.startTime,
         gotH: Math.round(bestGap * 10) / 10,
-        wantedH: Math.round(longRestH * 10) / 10,
+        wantedH: restThresholdH,
       });
     }
-    for (const sl of block.slots) {
-      busy.get(best)!.push({ start: sl.startMs, end: sl.endMs });
-      hours.set(best, (hours.get(best) ?? 0) + shiftHours);
-      assignments.push({ slot: sl, person: best, anchored: false });
+    if (slot.adjusted !== 0) {
+      adjustedCount.set(best, (adjustedCount.get(best) ?? 0) + 1);
+      adjusted.push({
+        person: best,
+        dateIso: slot.dateIso,
+        startTime: slot.startTime,
+        lengthH: slot.lengthH,
+      });
     }
+    busy.get(best)!.push({ start: slot.startMs, end: slot.endMs });
+    hours.set(best, (hours.get(best) ?? 0) + slot.lengthH);
+    assignments.push({ slot, person: best, anchored: false });
   }
-  assignments.sort((a, b) => a.slot.startMs - b.slot.startMs);
 
   const gaps = restGaps(people, busy);
   const worst = gaps.reduce<number | null>((min, g) => {
@@ -624,7 +625,8 @@ export function planShifts(
       }))
       .sort((a, b) => b.hours - a.hours),
     worstRestH: worst,
-    patternDeviations,
+    noRest,
+    adjusted,
     elapsedMs: Date.now() - t0,
   };
 }
