@@ -255,7 +255,7 @@ export default function OffTimePage() {
                 <tr>
                   <th
                     rowSpan={2}
-                    className="sticky start-0 z-30 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase"
+                    className="sticky start-0 z-30 w-20 min-w-20 max-w-20 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase"
                   >
                     תאריך
                   </th>
@@ -273,7 +273,7 @@ export default function OffTimePage() {
               )}
               <tr>
                 {!viewAll && (
-                  <th className="sticky start-0 z-30 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  <th className="sticky start-0 z-30 w-20 min-w-20 max-w-20 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     תאריך
                   </th>
                 )}
@@ -306,7 +306,7 @@ export default function OffTimePage() {
                 return (
                   <tr key={iso} id={`offrow-${iso}`}>
                     <td
-                      className={`sticky start-0 z-10 w-16 min-w-16 max-w-16 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
+                      className={`sticky start-0 z-10 w-20 min-w-20 max-w-20 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
                         isToday || isShabbat || holiday ? "text-primary glow-text" : "text-secondary-foreground"
                       }`}
                     >

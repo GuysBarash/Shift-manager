@@ -53,7 +53,7 @@ export function FragmentDay({
             {hour === 0 && (
               <td
                 rowSpan={24}
-                className={`sticky start-0 z-10 w-14 min-w-14 max-w-14 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
+                className={`sticky start-0 z-10 w-20 min-w-20 max-w-20 border-b border-e border-border/60 bg-secondary px-1 py-1.5 align-top font-mono leading-tight ${
                   isToday || isShabbat || holiday ? "text-primary glow-text" : "text-secondary-foreground"
                 }`}
               >
@@ -66,7 +66,7 @@ export function FragmentDay({
               </td>
             )}
             <td
-              className={`sticky start-14 z-10 h-8 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
+              className={`sticky start-20 z-10 h-8 w-16 min-w-16 max-w-16 border-b border-border/60 bg-card px-1 py-1.5 font-mono text-xs leading-tight whitespace-nowrap ${
                 isNowRow ? "text-primary glow-text font-bold" : "text-muted-foreground"
               }`}
             >

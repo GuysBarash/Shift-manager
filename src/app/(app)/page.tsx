@@ -655,10 +655,10 @@ export default function ShiftsPage() {
             <table className="border-collapse text-sm select-none">
               <thead className="sticky top-0 z-20 bg-card">
                 <tr>
-                  <th className="sticky start-0 z-30 h-9 w-14 min-w-14 max-w-14 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  <th className="sticky start-0 z-30 h-9 w-20 min-w-20 max-w-20 border-b border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     תאריך
                   </th>
-                  <th className="sticky start-14 z-30 h-9 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                  <th className="sticky start-20 z-30 h-9 w-16 min-w-16 max-w-16 border-b border-s border-border/60 bg-card px-1.5 py-2 text-start text-xs font-medium tracking-wide text-muted-foreground uppercase">
                     שעה
                   </th>
                   {SHIFT_COLUMNS.map((col) => (
