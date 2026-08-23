@@ -504,6 +504,7 @@ export default function ShiftsPage() {
                       currentHour={currentHour}
                       profileById={profileById}
                       colorAssignments={colorAssignments}
+                      timeOffIndex={timeOffIndex}
                       userId={userId}
                       brushActive={!!brush}
                       onPaintDown={(hour, col) => handlePaintDown(day, hour, col)}

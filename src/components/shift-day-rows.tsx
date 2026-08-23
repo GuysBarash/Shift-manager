@@ -1,6 +1,7 @@
 import { formatDDMMYYYY, formatDowShort, formatHourLabel } from "@/lib/dates";
 import { ISRAELI_HOLIDAYS } from "@/lib/holidays";
-import type { Profile, Shift } from "@/types/database";
+import { isOnTimeOffAtHour } from "@/lib/roster";
+import type { Profile, Shift, TimeOff } from "@/types/database";
 
 export function FragmentDay({
   iso,
@@ -11,6 +12,7 @@ export function FragmentDay({
   currentHour,
   profileById,
   colorAssignments,
+  timeOffIndex,
   userId,
   brushActive,
   onPaintDown,
@@ -25,6 +27,10 @@ export function FragmentDay({
   currentHour: number;
   profileById: Map<string, Profile>;
   colorAssignments: Map<string, { name: string; hex: string }>;
+  // Lets an assigned-but-currently-home shift show crossed out — a real
+  // scheduling conflict, so it should be unmistakable right on the main
+  // grid, not just in the extended per-person view.
+  timeOffIndex: Map<string, TimeOff[]>;
   userId: string;
   brushActive: boolean;
   onPaintDown: (hour: number, col: string) => void;
@@ -72,6 +78,9 @@ export function FragmentDay({
               const assignee = shift?.assigned_to ? profileById.get(shift.assigned_to) : null;
               const color = shift?.assigned_to ? colorAssignments.get(shift.assigned_to) : null;
               const isMine = shift?.assigned_to === userId;
+              const atHome = shift?.assigned_to
+                ? isOnTimeOffAtHour(timeOffIndex, shift.assigned_to, iso, hour)
+                : false;
 
               return (
                 <td
@@ -98,8 +107,9 @@ export function FragmentDay({
                     // than the same row in the extended per-person table
                     // next to it, throwing the two tables out of alignment.
                     <span
-                      className="block truncate font-medium"
+                      className={`block truncate font-medium ${atHome ? "line-through opacity-70" : ""}`}
                       style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
+                      title={atHome ? "משובץ אך נמצא בבית" : undefined}
                     >
                       {assignee.full_name}
                     </span>

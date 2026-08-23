@@ -458,7 +458,10 @@ export function planShifts(
     if (!a.person) continue;
     const p = byName.get(a.person);
     const start = atHour(a.dateIso, 0) + hmsToMs(a.startTime);
-    const end = start + shiftHours * HOUR;
+    // The anchor's REAL end. Painting three hours by hand used to be recorded
+    // as a full shift, so the slot was marked taken, no row was written for it,
+    // and the rest of the shift silently stayed empty.
+    const end = anchorEnd(a, start, shiftHours);
     if (!p) {
       conflicts.push(`${a.person} משובץ ב-${a.dateIso} אך אינו ברשימת הסבב`);
       continue;
@@ -471,7 +474,7 @@ export function planShifts(
       conflicts.push(`${a.person}: שתי משמרות מעוגנות חופפות ב-${a.dateIso}`);
     }
     list.push({ start, end });
-    hours.set(a.person, (hours.get(a.person) ?? 0) + shiftHours);
+    hours.set(a.person, (hours.get(a.person) ?? 0) + (end - start) / HOUR);
   }
 
   // -- the rest model -------------------------------------------------------
@@ -510,6 +513,27 @@ export function planShifts(
     const anchor = anchorAt.get(key);
     if (anchor) {
       assignments.push({ slot, person: anchor.person, anchored: true });
+      // A hand-painted piece may be shorter than the slot it sits in. Finish
+      // it rather than leaving the remainder blank: the same person carries
+      // on to the end of their shift, which is what "complete from here"
+      // means when you have painted the first few hours yourself.
+      if (anchor.person) {
+        const aStart = atHour(anchor.dateIso, 0) + hmsToMs(anchor.startTime);
+        const aEnd = anchorEnd(anchor, aStart, shiftHours);
+        if (aEnd < slot.endMs) {
+          const rest: Slot = {
+            ...slot,
+            startMs: aEnd,
+            startTime: hhmmss(aEnd),
+            lengthH: (slot.endMs - aEnd) / HOUR,
+            adjusted: (slot.endMs - aEnd) / HOUR - shiftHours,
+          };
+          assignments.push({ slot: rest, person: anchor.person, anchored: false });
+          busy.get(anchor.person)?.push({ start: aEnd, end: slot.endMs });
+          hours.set(anchor.person,
+            (hours.get(anchor.person) ?? 0) + (slot.endMs - aEnd) / HOUR);
+        }
+      }
       continue;
     }
     if (slot.startMs < boundary) {
@@ -629,6 +653,22 @@ export function planShifts(
     adjusted,
     elapsedMs: Date.now() - t0,
   };
+}
+
+/**
+ * Where an anchored shift actually ends.
+ *
+ * Falls back to a full shift when the row carries no usable end. "23:59:59" is
+ * how toShiftRows writes a piece that runs to midnight, so it means the next
+ * midnight, not a second before it.
+ */
+function anchorEnd(a: Anchor, startMs: number, shiftHours: number): number {
+  if (!a.endTime) return startMs + shiftHours * HOUR;
+  const midnight = atHour(addDaysIso(a.dateIso, 1), 0);
+  if (a.endTime === "23:59:59") return midnight;
+  let end = atHour(a.dateIso, 0) + hmsToMs(a.endTime);
+  if (end <= startMs) end = midnight;        // crossed midnight
+  return end;
 }
 
 function hmsToMs(hms: string): number {
