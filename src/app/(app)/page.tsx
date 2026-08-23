@@ -16,7 +16,7 @@ import {
   TIME_OFF_COLOR,
 } from "@/lib/roster";
 import { buildDayGrid, buildPersonHourGrid } from "@/lib/shift-grid";
-import { buildSlots, planShifts } from "@/lib/shift-plan";
+import { buildSlots, planShifts, type PlanResult } from "@/lib/shift-plan";
 import { buildAnchorsFromShifts, buildPresenceFromTimeOff } from "@/lib/shift-plan-adapter";
 import { BrushToolbar, type Brush } from "@/components/brush-toolbar";
 import { FragmentDay } from "@/components/shift-day-rows";
@@ -51,6 +51,24 @@ export default function ShiftsPage() {
   // updater-based ref would still read stale data across all of them). This
   // ref is always current the instant applyShifts returns.
   const shiftsRef = useRef<Shift[]>([]);
+  // A short history of what the board has been PUT THROUGH this session, so a
+  // debug export can explain how it got into its current state. One snapshot
+  // of the result is not enough - "it filled backwards" only makes sense next
+  // to the window and resume points the fill was given.
+  type PlanRun = {
+    at: string;
+    kind: "autofill" | "delete-from-here";
+    fromIso: string;
+    toIso: string;
+    clickedAtMs: number;
+    resumeAt: Record<string, number>;
+    slots: number;
+    result: PlanResult | null;
+  };
+  const planHistoryRef = useRef<PlanRun[]>([]);
+  const rememberRun = (run: PlanRun) => {
+    planHistoryRef.current = [...planHistoryRef.current, run].slice(-8);
+  };
   // Snapshot taken the moment edit mode is entered, restored verbatim on
   // discard. Every paint/erase during edit mode only ever touches local
   // state (see paintCell) — nothing reaches the DB until Save, so this one
@@ -280,9 +298,62 @@ export default function ShiftsPage() {
       notes: s.notes,
     }));
 
+    // What the planner was ASKED and what it DECIDED, not just the board after
+    // the fact. A report of "it filled backwards" is unanswerable without the
+    // window, the per-column resume points, and which anchors failed to land
+    // on the start grid - so all of that goes in.
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const gridOf = (col: string, i: number) => {
+      const step = 6;                       // shift length; half-shift stagger
+      const offset = i * (step / 2);
+      return Array.from({ length: 24 / step }, (_, k) =>
+        `${String((offset + k * step) % 24).padStart(2, "0")}:00`
+      );
+    };
+
+    const offGrid = shifts
+      .filter((s) => {
+        if (!s.position || !s.start_time) return false;
+        const i = SHIFT_COLUMNS.indexOf(s.position);
+        if (i < 0) return false;
+        return !gridOf(s.position, i).includes(s.start_time.slice(0, 5));
+      })
+      .map((s) => ({
+        shift_date: s.shift_date,
+        position: s.position,
+        start_time: s.start_time,
+        end_time: s.end_time,
+        who: s.assigned_to ? (profileById.get(s.assigned_to)?.full_name ?? null) : null,
+        why: "start time is not on this column's grid, so the planner cannot match it to a slot",
+      }));
+
     const payload = {
       generatedAt: new Date().toISOString(),
       range: { start: toISODate(rangeStart), end: toISODate(addDays(rangeStart, RANGE_DAYS - 1)) },
+      columns: SHIFT_COLUMNS,
+      startGrid: Object.fromEntries(SHIFT_COLUMNS.map((c, i) => [c, gridOf(c, i)])),
+      // Oldest first. Empty means the board was not touched by an auto-fill in
+      // this session, so anything odd about it came from somewhere else.
+      history: planHistoryRef.current.map((run) => ({
+        at: run.at,
+        kind: run.kind,
+        window: { from: run.fromIso, to: run.toIso },
+        clickedAt: iso(run.clickedAtMs),
+        resumeAt: Object.fromEntries(
+          Object.entries(run.resumeAt).map(([c, ms]) => [c, iso(ms)])
+        ),
+        slotsConsidered: run.slots,
+        rowsWritten: run.result?.rows.length ?? 0,
+        unfilled: (run.result?.unfilled ?? []).map((u) => ({
+          date: u.dateIso, start: u.startTime, column: u.column,
+        })),
+        conflicts: run.result?.conflicts ?? [],
+        noRest: run.result?.noRest ?? [],
+        overRested: run.result?.overRested ?? [],
+        adjusted: run.result?.adjusted ?? [],
+        load: run.result?.load ?? [],
+      })),
+      offGridShifts: offGrid,
       shifts: shiftsOut,
       presenceSambatz: presence,
     };
@@ -390,23 +461,90 @@ export default function ShiftsPage() {
         createLocalPiece(s.shift_date, s.position ?? "", s.start_time, hourStart, s.assigned_to, s.notes);
       }
     });
+
+    rememberRun({
+      at: new Date().toISOString(),
+      kind: "delete-from-here",
+      fromIso: shiftDate,
+      toIso: toISODate(addDays(rangeStart, RANGE_DAYS - 1)),
+      clickedAtMs: new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime(),
+      resumeAt: {},
+      slots: toRemove.length,
+      result: null,
+    });
   }
 
-  // Auto-fill from the clicked day through the end of the visible range.
-  // Everything already in `shifts` (manual paints or an earlier auto-fill)
-  // is passed to the planner as anchors — read for rest-history continuity,
-  // never overwritten — so this only ever fills genuinely open slots at or
-  // after the clicked day. (Day-granular, not hour-granular: the planner's
-  // replan boundary is a whole calendar day, so the clicked hour only picks
-  // which day to start from.)
-  function continueFromHere(day: Date) {
+  // Auto-fill forward from the clicked HOUR, for one month or to the end of
+  // the calendar, whichever comes first. Everything already in `shifts`
+  // (manual paints or an earlier auto-fill) is passed to the planner as
+  // anchors — read for rest-history continuity, never overwritten. Each
+  // column resumes from the end of whatever is already booked there, so a
+  // hand-painted piece is continued rather than planned around. It used to
+  // start at midnight of the clicked day, which wrote shifts BEFORE the cells
+  // that had just been painted.
+  /**
+   * Where each column's chain should pick up from.
+   *
+   * Walks forward through whatever is already booked in that column, so a
+   * hand-painted piece is continued rather than planned around. Without this
+   * the fill started at midnight of the clicked day and wrote shifts BEFORE
+   * the cells you had just painted.
+   */
+  function resumePointsPerColumn(fromMs: number): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const col of SHIFT_COLUMNS) {
+      const inCol = shiftsRef.current
+        .filter((s) => s.position === col)
+        .map((s) => ({
+          start: new Date(`${s.shift_date}T${s.start_time}`).getTime(),
+          end:
+            s.end_time === "23:59:59"
+              ? new Date(`${s.shift_date}T00:00:00`).getTime() + 24 * 3600_000
+              : new Date(`${s.shift_date}T${s.end_time}`).getTime(),
+        }))
+        .sort((a, b) => a.start - b.start);
+      let t = fromMs;
+      let moved = true;
+      while (moved) {
+        moved = false;
+        for (const b of inCol) {
+          if (b.start <= t && b.end > t) {
+            t = b.end;
+            moved = true;
+          }
+        }
+      }
+      out[col] = t;
+    }
+    return out;
+  }
+
+  function continueFromHere(day: Date, hour: number) {
+    // Start from the hour that was clicked, not midnight, and never before it.
+    const fromMs = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
+    const resumeAt = resumePointsPerColumn(fromMs);
     const fromIso = toISODate(day);
-    const toIso = toISODate(addDays(rangeStart, RANGE_DAYS - 1));
+
+    // Auto-fill covers ONE MONTH forward, or the end of the calendar if that
+    // comes first. Filling the whole horizon in one go made a single click
+    // rewrite months of schedule.
+    const monthOut = new Date(day.getFullYear(), day.getMonth() + 1, day.getDate());
+    const calendarEnd = addDays(rangeStart, RANGE_DAYS - 1);
+    const toIso = toISODate(monthOut < calendarEnd ? monthOut : calendarEnd);
     try {
       const people = buildPresenceFromTimeOff(sambatzProfiles, timeOffIndex, rangeStart, RANGE_DAYS);
       const anchors = buildAnchorsFromShifts(shiftsRef.current, profileById);
-      const slots = buildSlots(fromIso, toIso, { columns: SHIFT_COLUMNS });
+      const slots = buildSlots(fromIso, toIso, { columns: SHIFT_COLUMNS, resumeAt });
       const result = planShifts(people, slots, anchors, { columns: SHIFT_COLUMNS, fromDate: fromIso });
+      rememberRun({
+        at: new Date().toISOString(),
+        kind: "autofill",
+        fromIso, toIso,
+        clickedAtMs: fromMs,
+        resumeAt,
+        slots: slots.length,
+        result,
+      });
 
       const profileByName = new Map(sambatzProfiles.map((p) => [(p.full_name ?? "").trim(), p]));
       let created = 0;
@@ -441,7 +579,7 @@ export default function ShiftsPage() {
       return;
     }
     if (brush === "continue-from-here") {
-      continueFromHere(day);
+      continueFromHere(day, hour);
       return;
     }
     isPaintingRef.current = true;
