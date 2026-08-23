@@ -96,6 +96,23 @@ export type PlanOptions = {
    */
   restThresholdH?: number;
   /**
+   * Rest stops being ideal past this and is forbidden past `maxRestH`.
+   * Default 2 shifts - the 12r that ends both ideal cycles.
+   */
+  idealMaxRestH?: number;
+  /**
+   * Ceiling on the gap between two shifts. A gap longer than this is a
+   * violation - somebody was left idle too long. Default 3 shifts. The gap
+   * before going home is NOT bound by it; that one is maximised instead.
+   */
+  maxRestH?: number;
+  /**
+   * How close to going home counts as "leaving soon". Inside this window the
+   * ceiling stops pulling somebody back for one last shift, which is the
+   * "except before leaving" carve-out. Default 1.5 shifts.
+   */
+  leavingSoonH?: number;
+  /**
    * HARD floor on the gap between two shifts, in hours. Default shiftHours:
    * half a shift counts the same as back to back, so a full shift off is the
    * shortest legal gap. A slot goes unfilled rather than break it.
@@ -129,6 +146,8 @@ export type PlanResult = {
   noRest: NoRestEvent[];
   /** Shifts run short or long to walk the column back onto the grid. */
   adjusted: AdjustedShift[];
+  /** Gaps longer than maxRestH: somebody left idle past the ceiling. */
+  overRested: NoRestEvent[];
   elapsedMs: number;
 };
 
@@ -167,6 +186,9 @@ const W_RESTED = 12;       // A: prefer the most-rested candidate (saturates)
 const W_TRAVEL = 10;       // B and C
 const W_LOAD = 15;
 const W_SPREAD = 6;        // spread unavoidable no-rest across people
+const W_CHAIN = 900;       // two short gaps running is worse than one, by a lot
+const W_OVERDUE = 90;      // urgency once somebody is approaching the ceiling
+const W_LONGREST = 30;     // mild dislike of a 3-shift gap
 const W_REUSE = 60;        // a 5h/7h shift should not land on the same person twice
 
 // --------------------------------------------------------------------------
@@ -433,6 +455,12 @@ export function planShifts(
   // forbidden, so the hard floor is a full shift.
   const restThresholdH = opts.restThresholdH ?? 1.5 * shiftHours;
   const minRestH = opts.minRestH ?? shiftHours;
+  // The ideal cycle is 6w 12r, or 6w 6r 6w 12r when the pool is one short.
+  // Either way the rest that follows is TWO shifts - more than that is waste
+  // and is pushed down, not rewarded.
+  const idealMaxRestH = opts.idealMaxRestH ?? 2 * shiftHours;
+  const maxRestH = opts.maxRestH ?? 3 * shiftHours;
+  const leavingSoonH = opts.leavingSoonH ?? 1.5 * shiftHours;
   const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
   const boundary = opts.fromDate ? atHour(opts.fromDate, 0) : -Infinity;
 
@@ -507,6 +535,7 @@ export function planShifts(
   // lengthening, but either way one person should not absorb two of them.
   const adjustedCount = new Map<string, number>(people.map((p) => [p.name, 0] as const));
   const adjusted: AdjustedShift[] = [];
+  const overRested: NoRestEvent[] = [];
 
   for (const slot of ordered) {
     const key = `${slot.dateIso}|${slot.startTime}|${slot.column}`;
@@ -565,10 +594,6 @@ export function planShifts(
       // HARD: never back to back.
       if (hasPrev && gapH < minRestH) continue;
 
-      // A: how far short of a real rest this would be, 0 when it is fine.
-      const shortBy = hasPrev ? Math.max(0, restThresholdH - gapH) : 0;
-      const rested = Math.min(hasPrev ? gapH : restThresholdH, restThresholdH);
-
       // B and C: rest either side of travel. Infinite mid-stay, so it only
       // bites at the edges. Capped - past a day more is not worth trading for.
       const firstOfStay = !list.some((b) => b.start >= w.from && b.end <= w.until);
@@ -579,12 +604,47 @@ export function planShifts(
         untilDeparture
       );
 
+      // Was their PREVIOUS gap also short? "6w 6r 6w 12r" is a legal double
+      // shift, but "6w 6r 6w 6r 6w" is a chain with no real break in it. So a
+      // no-rest gap is acceptable once, never twice running.
+      let prevWasShort = false;
+      if (hasPrev) {
+        const mine = list
+          .filter((b) => b.start >= w.from && b.end <= w.until && b.end <= slot.startMs)
+          .sort((a, b) => a.start - b.start);
+        if (mine.length >= 2) {
+          const before = (mine[mine.length - 1].start - mine[mine.length - 2].end) / HOUR;
+          prevWasShort = before < restThresholdH;
+        }
+      }
+
+      // A: how far short of a real rest this would be, 0 when it is fine.
+      const shortBy = hasPrev ? Math.max(0, restThresholdH - gapH) : 0;
+      const rested = Math.min(hasPrev ? gapH : restThresholdH, restThresholdH);
+
+      // B and C: rest either side of travel. Infinite mid-stay, so it only
+      // bites at the edges. Capped - past a day more is not worth trading for.
       const perDay = (hours.get(p.name) ?? 0) / daysAtBase.get(p.name)!;
       const expectedPerDay = (24 * lanes) / Math.max(1, presentAt(people, slot));
       const loadRatio = perDay / Math.max(1, expectedPerDay);
 
+      // Past the ideal band the pressure reverses: leaving somebody idle is now
+      // the problem, so the longer they have waited the more urgent they are.
+      // This cannot be a filter - it is about NOT being given a shift - so it
+      // has to outweigh the ordinary preferences instead.
+      //
+      // "except before leaving": a long rest is fine if it is the last one
+      // before going home, so the urgency is switched off once departure is
+      // within a cycle. Without this the planner drags somebody back for one
+      // more shift on their way out and destroys optimisation B.
+      const leavingSoon = untilDeparture <= leavingSoonH;
+      const overBy = hasPrev && !leavingSoon ? Math.max(0, gapH - idealMaxRestH) : 0;
+
       const score =
-        -W_NOREST * (shortBy / restThresholdH) +
+        W_OVERDUE * Math.min(overBy, 2 * shiftHours) +
+        (hasPrev && !leavingSoon && gapH >= maxRestH ? -W_LONGREST : 0) +
+        -W_NOREST * (shortBy / restThresholdH) -
+        (shortBy > 0 && prevWasShort ? W_CHAIN : 0) +
         W_RESTED * rested +
         W_TRAVEL * Math.min(bindingRest, 18) -
         W_LOAD * loadRatio -
@@ -602,6 +662,15 @@ export function planShifts(
       unfilled.push(slot);
       assignments.push({ slot, person: null, anchored: false });
       continue;
+    }
+    if (Number.isFinite(bestGap) && bestGap > maxRestH) {
+      overRested.push({
+        person: best,
+        dateIso: slot.dateIso,
+        startTime: slot.startTime,
+        gotH: Math.round(bestGap * 10) / 10,
+        wantedH: maxRestH,
+      });
     }
     if (Number.isFinite(bestGap) && bestGap < restThresholdH) {
       misses.set(best, (misses.get(best) ?? 0) + 1);
@@ -651,6 +720,7 @@ export function planShifts(
     worstRestH: worst,
     noRest,
     adjusted,
+    overRested,
     elapsedMs: Date.now() - t0,
   };
 }

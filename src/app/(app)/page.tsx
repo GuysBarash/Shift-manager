@@ -9,6 +9,7 @@ import { useDemoIdentity } from "@/lib/demo-identity";
 import { scheduleRangeDays } from "@/lib/schedule-range";
 import {
   buildDateRange,
+  isAdmin as selectIsAdmin,
   isOnTimeOffAtHour,
   buildTimeOffIndex,
   sambatzProfiles as selectSambatz,
@@ -23,6 +24,7 @@ import type { Profile, Shift, TimeOff } from "@/types/database";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ActivityPanel } from "@/components/activity-panel";
+import { FileJson } from "lucide-react";
 
 // Two fixed slots per hour rather than positions derived from existing
 // shifts — that made an empty board a dead end (no columns meant nowhere to
@@ -74,6 +76,8 @@ export default function ShiftsPage() {
   // Only Sambatz can actually be assigned to shifts — the paint palette and
   // the per-person extended table are scoped to them.
   const sambatzProfiles = useMemo(() => selectSambatz(profiles), [profiles]);
+
+  const isAdmin = selectIsAdmin(profiles, userId);
 
   const colorAssignments = useMemo(() => buildColorAssignments(profiles), [profiles]);
 
@@ -250,6 +254,48 @@ export default function ShiftsPage() {
     scrollToRow(best.date, best.hour);
   }
 
+  // Admin-only debug export: the raw shifts for the visible range, plus who
+  // is actually present when (sambatz only) — the same presence windows
+  // "השלם מכאן" itself plans against, so this is the quickest way to see
+  // why the auto-fill did or didn't do something.
+  function downloadDebugJson() {
+    const presence = buildPresenceFromTimeOff(sambatzProfiles, timeOffIndex, rangeStart, RANGE_DAYS).map(
+      (p) => ({
+        name: p.name,
+        windows: p.windows.map((w) => ({
+          from: new Date(w.from).toISOString(),
+          until: new Date(w.until).toISOString(),
+        })),
+      })
+    );
+
+    const shiftsOut = shifts.map((s) => ({
+      id: s.id,
+      shift_date: s.shift_date,
+      start_time: s.start_time,
+      end_time: s.end_time,
+      position: s.position,
+      assigned_to: s.assigned_to,
+      assigned_to_name: s.assigned_to ? (profileById.get(s.assigned_to)?.full_name ?? null) : null,
+      notes: s.notes,
+    }));
+
+    const payload = {
+      generatedAt: new Date().toISOString(),
+      range: { start: toISODate(rangeStart), end: toISODate(addDays(rangeStart, RANGE_DAYS - 1)) },
+      shifts: shiftsOut,
+      presenceSambatz: presence,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `shifts-debug-${toISODate(rangeStart)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Purely local — no network call. Edit mode batches every change into one
   // Save, so nothing reaches the DB until then.
   function createLocalPiece(
@@ -371,11 +417,18 @@ export default function ShiftsPage() {
         created++;
       }
 
+      // Surface what the planner actually optimises for, not just the count.
+      // noRest is the one to watch: a shift, one shift off, a shift again.
+      // overRested is somebody left idle past the ceiling, and adjusted are
+      // the 5h/7h shifts that walk a column back onto the start grid.
       const parts = [`מולאו ${created} משמרות`];
       if (result.unfilled.length > 0) parts.push(`${result.unfilled.length} משבצות לא אוישו`);
       if (result.conflicts.length > 0) parts.push(`${result.conflicts.length} התנגשויות`);
-      if (result.worstRestH !== null) parts.push(`מנוחה מינימלית ${Math.round(result.worstRestH * 10) / 10} שעות`);
-      toast[result.conflicts.length > 0 ? "warning" : "success"](parts.join(" · "));
+      if (result.noRest.length > 0) parts.push(`${result.noRest.length} ללא מנוחה`);
+      if (result.overRested.length > 0) parts.push(`${result.overRested.length} מנוחה ארוכה מדי`);
+      if (result.adjusted.length > 0) parts.push(`${result.adjusted.length} משמרות מותאמות`);
+      const bad = result.conflicts.length > 0 || result.overRested.length > 0;
+      toast[bad ? "warning" : "success"](parts.join(" · "));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "שגיאה במילוי האוטומטי.");
     }
@@ -402,14 +455,22 @@ export default function ShiftsPage() {
 
   return (
     <div className="space-y-2 sm:space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between">
         <h1 className="text-base font-semibold tracking-wide glow-text sm:text-lg">
           לוח משמרות{" "}
           <span className="hidden text-muted-foreground sm:inline">
             — החל מ{formatDow(rangeStart)} {formatDDMMYYYY(rangeStart)}
           </span>
         </h1>
-        <ActivityPanel profiles={profiles} />
+        <div className="flex flex-col items-end gap-2">
+          <ActivityPanel profiles={profiles} />
+          {isAdmin && (
+            <Button variant="outline" size="sm" onClick={downloadDebugJson}>
+              <FileJson className="size-4" />
+              הורדת JSON (דיבוג)
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 sm:gap-4">
