@@ -350,7 +350,7 @@ export default function OffTimePage() {
                                 className="text-xs font-semibold"
                                 style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
                               >
-                                בצבא
+                                צבא
                               </span>
                             ))}
                         </td>,

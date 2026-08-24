@@ -721,6 +721,7 @@ export default function ShiftsPage() {
                                 // one silently.
                                 const conflict = !!onShift && atHome;
                                 const color = colorAssignments.get(p.id);
+                                const isMe = p.id === userId;
                                 const cellStyle: React.CSSProperties = conflict
                                   ? {
                                       backgroundImage: `repeating-linear-gradient(45deg, ${color?.hex}88 0px, ${color?.hex}88 6px, ${TIME_OFF_COLOR} 6px, ${TIME_OFF_COLOR} 12px)`,
@@ -739,17 +740,34 @@ export default function ShiftsPage() {
                                     style={cellStyle}
                                   >
                                     {onShift ? (
-                                      // A dot alongside the color tint, same
-                                      // as the off-time grid — color alone
-                                      // isn't distinguishable for colorblind
-                                      // viewers.
-                                      <span
-                                        className="inline-block size-2.5 rounded-full"
-                                        style={{
-                                          backgroundColor: color?.hex,
-                                          boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
-                                        }}
-                                      />
+                                      isMe ? (
+                                        // Your own column reads as the word
+                                        // instead of a dot — same idea as
+                                        // "just me" in the off-time grid, so
+                                        // you can spot yourself at a glance
+                                        // among everyone else's dots.
+                                        <span
+                                          className="text-xs font-semibold"
+                                          style={{
+                                            color: color?.hex,
+                                            textShadow: color ? `0 0 6px ${color.hex}66` : undefined,
+                                          }}
+                                        >
+                                          צבא
+                                        </span>
+                                      ) : (
+                                        // A dot alongside the color tint,
+                                        // same as the off-time grid — color
+                                        // alone isn't distinguishable for
+                                        // colorblind viewers.
+                                        <span
+                                          className="inline-block size-2.5 rounded-full"
+                                          style={{
+                                            backgroundColor: color?.hex,
+                                            boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                                          }}
+                                        />
+                                      )
                                     ) : (
                                       " "
                                     )}
