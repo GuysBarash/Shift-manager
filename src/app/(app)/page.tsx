@@ -738,7 +738,21 @@ export default function ShiftsPage() {
                                     className="h-8 border-b border-s border-border/60 px-2 py-1.5 text-center font-mono"
                                     style={cellStyle}
                                   >
-                                    {" "}
+                                    {onShift ? (
+                                      // A dot alongside the color tint, same
+                                      // as the off-time grid — color alone
+                                      // isn't distinguishable for colorblind
+                                      // viewers.
+                                      <span
+                                        className="inline-block size-2.5 rounded-full"
+                                        style={{
+                                          backgroundColor: color?.hex,
+                                          boxShadow: color ? `0 0 6px ${color.hex}` : undefined,
+                                        }}
+                                      />
+                                    ) : (
+                                      " "
+                                    )}
                                   </td>
                                 );
                               })

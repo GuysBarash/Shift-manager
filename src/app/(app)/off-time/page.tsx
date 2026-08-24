@@ -337,12 +337,22 @@ export default function OffTimePage() {
                                 }
                           }
                         >
-                          {!off && (
-                            <span
-                              className="inline-block size-2.5 rounded-full"
-                              style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
-                            />
-                          )}
+                          {!off &&
+                            (viewAll ? (
+                              <span
+                                className="inline-block size-2.5 rounded-full"
+                                style={{ backgroundColor: color?.hex, boxShadow: color ? `0 0 6px ${color.hex}` : undefined }}
+                              />
+                            ) : (
+                              // "Just me" is a single column — the word reads
+                              // better there than a lone dot would.
+                              <span
+                                className="text-xs font-semibold"
+                                style={{ color: color?.hex, textShadow: color ? `0 0 6px ${color.hex}66` : undefined }}
+                              >
+                                בצבא
+                              </span>
+                            ))}
                         </td>,
                       ];
                     })}

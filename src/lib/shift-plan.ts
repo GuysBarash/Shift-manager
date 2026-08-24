@@ -189,6 +189,7 @@ const W_SPREAD = 6;        // spread unavoidable no-rest across people
 const W_CHAIN = 900;       // two short gaps running is worse than one, by a lot
 const W_OVERDUE = 90;      // urgency once somebody is approaching the ceiling
 const W_LONGREST = 30;     // mild dislike of a 3-shift gap
+const W_TIGHT = 25;        // stop the same person always taking minimum rest
 const W_REUSE = 60;        // a 5h/7h shift should not land on the same person twice
 
 // --------------------------------------------------------------------------
@@ -534,6 +535,9 @@ export function planShifts(
   // Realignment shifts already carried. Shortening is preferred over
   // lengthening, but either way one person should not absorb two of them.
   const adjustedCount = new Map<string, number>(people.map((p) => [p.name, 0] as const));
+  // How often each person has been picked up at the bare minimum rest. Legal,
+  // but it should not always be the same person - see W_TIGHT.
+  const tightRest = new Map<string, number>(people.map((p) => [p.name, 0] as const));
   const adjusted: AdjustedShift[] = [];
   const overRested: NoRestEvent[] = [];
 
@@ -620,7 +624,11 @@ export function planShifts(
 
       // A: how far short of a real rest this would be, 0 when it is fine.
       const shortBy = hasPrev ? Math.max(0, restThresholdH - gapH) : 0;
-      const rested = Math.min(hasPrev ? gapH : restThresholdH, restThresholdH);
+      // Saturate at the IDEAL, not at the threshold. Saturating at the
+      // threshold made 9h and 12h score identically, so the tiebreak fell to
+      // load and whoever was lightest got grabbed the moment they became
+      // legal - one person living on minimum rest while others sat at 12h.
+      const rested = Math.min(hasPrev ? gapH : idealMaxRestH, idealMaxRestH);
 
       // B and C: rest either side of travel. Infinite mid-stay, so it only
       // bites at the edges. Capped - past a day more is not worth trading for.
@@ -638,18 +646,25 @@ export function planShifts(
       // within a cycle. Without this the planner drags somebody back for one
       // more shift on their way out and destroys optimisation B.
       const leavingSoon = untilDeparture <= leavingSoonH;
-      const overBy = hasPrev && !leavingSoon ? Math.max(0, gapH - idealMaxRestH) : 0;
+      //
+      // Somebody sitting at base unscheduled is overdue in exactly the same
+      // way as somebody between shifts, so the first shift of a stay counts
+      // from ARRIVAL. Without this a person could arrive and be left for days
+      // - the ceiling only ever looked at gaps between two shifts.
+      const idleH = hasPrev ? gapH : sinceArrival;
+      const overBy = leavingSoon ? 0 : Math.max(0, idleH - idealMaxRestH);
 
       const score =
         W_OVERDUE * Math.min(overBy, 2 * shiftHours) +
-        (hasPrev && !leavingSoon && gapH >= maxRestH ? -W_LONGREST : 0) +
+        (!leavingSoon && idleH >= maxRestH ? -W_LONGREST : 0) +
         -W_NOREST * (shortBy / restThresholdH) -
         (shortBy > 0 && prevWasShort ? W_CHAIN : 0) +
         W_RESTED * rested +
         W_TRAVEL * Math.min(bindingRest, 18) -
         W_LOAD * loadRatio -
         (shortBy > 0 ? W_SPREAD * (misses.get(p.name) ?? 0) : 0) -
-        (slot.adjusted !== 0 ? W_REUSE * (adjustedCount.get(p.name) ?? 0) : 0);
+        (slot.adjusted !== 0 ? W_REUSE * (adjustedCount.get(p.name) ?? 0) : 0) -
+        (hasPrev && gapH < idealMaxRestH ? W_TIGHT * (tightRest.get(p.name) ?? 0) : 0);
 
       if (score > bestScore) {
         bestScore = score;
@@ -681,6 +696,9 @@ export function planShifts(
         gotH: Math.round(bestGap * 10) / 10,
         wantedH: restThresholdH,
       });
+    }
+    if (Number.isFinite(bestGap) && bestGap < idealMaxRestH) {
+      tightRest.set(best, (tightRest.get(best) ?? 0) + 1);
     }
     if (slot.adjusted !== 0) {
       adjustedCount.set(best, (adjustedCount.get(best) ?? 0) + 1);
