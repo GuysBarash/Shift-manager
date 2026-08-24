@@ -482,15 +482,31 @@ export function planShifts(
 
   // -- anchors first: they own their slot and their person's time ----------
   const anchorAt = new Map<string, Anchor>();
+  // Every anchor's real occupied time range, by column — this is what stops
+  // a slot from being handed to someone else. The exact dateIso|startTime|
+  // column key match below only catches an anchor that happens to sit
+  // exactly on the generated grid; a hand-painted piece almost never does
+  // (e.g. someone painted from 14:00 but the grid's slots start on the
+  // hour marks the algorithm generates, not on whatever hour was clicked).
+  // Without this, an off-grid anchor was invisible to every OTHER
+  // candidate's overlap check (which only looks at their OWN busy list),
+  // so the planner would cheerfully hand a new person the same window —
+  // visually indistinguishable from the manual placement being overwritten,
+  // since the auto-filled piece renders on top in the grid.
+  const anchorBusyByColumn = new Map<string, Busy[]>();
   for (const a of anchors) {
     anchorAt.set(`${a.dateIso}|${a.startTime}|${a.column}`, a);
-    if (!a.person) continue;
-    const p = byName.get(a.person);
     const start = atHour(a.dateIso, 0) + hmsToMs(a.startTime);
     // The anchor's REAL end. Painting three hours by hand used to be recorded
     // as a full shift, so the slot was marked taken, no row was written for it,
     // and the rest of the shift silently stayed empty.
     const end = anchorEnd(a, start, shiftHours);
+    const colList = anchorBusyByColumn.get(a.column) ?? [];
+    colList.push({ start, end });
+    anchorBusyByColumn.set(a.column, colList);
+
+    if (!a.person) continue;
+    const p = byName.get(a.person);
     if (!p) {
       conflicts.push(`${a.person} משובץ ב-${a.dateIso} אך אינו ברשימת הסבב`);
       continue;
@@ -571,6 +587,12 @@ export function planShifts(
     }
     if (slot.startMs < boundary) {
       // before the replan boundary and not anchored: leave it as it is
+      continue;
+    }
+    // An off-grid anchor (see above) doesn't match `key` but still owns this
+    // stretch of time — leave the slot unfilled rather than hand it to
+    // someone else and silently collide with a hand-painted piece.
+    if (overlaps(anchorBusyByColumn.get(slot.column) ?? [], slot)) {
       continue;
     }
 
