@@ -41,6 +41,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
+        {/* Capture Chrome's `beforeinstallprompt` the instant it fires. It's
+            dispatched once, very early — routinely before React hydrates and
+            NavBar's own listener attaches — and if nothing is listening at
+            that moment the event is gone until the next full navigation.
+            Stashing it on `window` here, during HTML parse, is what stops the
+            logo's install click from intermittently doing nothing on Android.
+            NavBar reads `window.__installPrompt` on mount and also listens for
+            the `installpromptchange` event this dispatches. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;window.dispatchEvent(new Event('installpromptchange'))});window.addEventListener('appinstalled',function(){window.__installPrompt=null;window.dispatchEvent(new Event('installpromptchange'))})})();",
+          }}
+        />
         {children}
         <Toaster />
       </body>

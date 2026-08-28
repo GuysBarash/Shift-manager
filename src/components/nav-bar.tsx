@@ -26,6 +26,14 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
+declare global {
+  interface Window {
+    // Set by the inline script in app/layout.tsx, which captures
+    // `beforeinstallprompt` before React has a chance to hydrate.
+    __installPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 function isStandalone(): boolean {
   if (typeof window === "undefined") return false;
   return (
@@ -44,7 +52,7 @@ export function NavBar() {
   // installable; capturing it is what lets a click show the browser's own
   // native "Install app?" dialog instead of the page having to fake one.
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showIosHint, setShowIosHint] = useState(false);
+  const [showInstallHint, setShowInstallHint] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -55,12 +63,24 @@ export function NavBar() {
   }, []);
 
   useEffect(() => {
+    // Pick up an event that fired before this component mounted (the common
+    // case — see the inline script in app/layout.tsx), then stay in sync with
+    // any later firing or an `appinstalled` that clears it.
+    function sync() {
+      setInstallPrompt(window.__installPrompt ?? null);
+    }
     function handleBeforeInstallPrompt(e: Event) {
       e.preventDefault();
+      window.__installPrompt = e as BeforeInstallPromptEvent;
       setInstallPrompt(e as BeforeInstallPromptEvent);
     }
+    sync();
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("installpromptchange", sync);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("installpromptchange", sync);
+    };
   }, []);
 
   // iOS Safari has no install API at all (Apple doesn't expose one) — the
@@ -70,19 +90,26 @@ export function NavBar() {
 
   async function handleLogoClick(e: React.MouseEvent) {
     if (isStandalone()) return; // already installed — plain "go home" link
-    if (installPrompt) {
+    // Fall back to the window-stashed event in case this ran before the
+    // effect's `sync()` (e.g. a very fast tap right after hydration).
+    const deferred = installPrompt ?? window.__installPrompt ?? null;
+    if (deferred) {
       e.preventDefault();
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      if (choice.outcome !== "dismissed") setInstallPrompt(null);
+      await deferred.prompt();
+      await deferred.userChoice;
+      // Chrome won't let the same event be prompted twice — drop it either
+      // way. If it was dismissed, Chrome re-fires `beforeinstallprompt`
+      // later and `sync()` picks the new one up.
+      window.__installPrompt = null;
+      setInstallPrompt(null);
       return;
     }
-    if (isIos) {
-      e.preventDefault();
-      setShowIosHint(true);
-    }
-    // Anything else (already installed, or a browser with neither path):
-    // fall through to the normal Link navigation.
+    // No native prompt available: iOS Safari (no install API at all),
+    // a non-Chromium browser, or Chrome hasn't offered it yet. Never let the
+    // tap look dead — show the manual, platform-specific steps instead of
+    // silently navigating home.
+    e.preventDefault();
+    setShowInstallHint(true);
   }
 
   // Needs the full roster (not just this one person) — colors are assigned
@@ -108,10 +135,10 @@ export function NavBar() {
             under dir="rtl", the conventional top-left corner regardless of
             text direction), capped at max-h-24 so it can't spiral upward on
             narrow screens (nav wraps -> column taller -> logo taller ->
-            even less width left for nav...). The column reserves pe-28,
-            comfortably wider than that capped logo, so its content never
-            renders underneath it. */}
-        <div className="flex flex-col justify-center gap-2 pe-28">
+            even less width left for nav...). The column reserves pe-32,
+            comfortably wider than that capped logo plus the anchor's own
+            tap-target padding, so its content never renders underneath it. */}
+        <div className="flex flex-col justify-center gap-2 pe-32">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -147,23 +174,43 @@ export function NavBar() {
             )}
           </div>
         </div>
+        {/* Whole logo is the tap target: the anchor is full header height and
+            adds px-2 on each side (end-2 + px-2 keeps the logo's visual
+            position identical to the old end-4). touch-manipulation drops
+            Android's ~300ms double-tap-zoom delay that can make a quick tap
+            feel dead; pointer-events-none + draggable=false on the image mean
+            every press resolves to the anchor and can't turn into an
+            image-drag or long-press menu instead of a click. */}
         <Link
           href="/"
           onClick={handleLogoClick}
-          className="absolute inset-y-0 end-4 flex items-center"
+          aria-label="דף הבית / התקנת האפליקציה"
+          className="absolute inset-y-0 end-2 flex touch-manipulation items-center px-2 select-none"
         >
-          <Image src={logo} alt="מנהל משמרות" priority className="h-full max-h-24 w-auto" />
+          <Image
+            src={logo}
+            alt="מנהל משמרות"
+            priority
+            draggable={false}
+            className="pointer-events-none h-full max-h-24 w-auto"
+          />
         </Link>
-        {showIosHint && (
+        {showInstallHint && (
           <div
-            className="absolute inset-y-0 end-4 top-full z-40 mt-2 w-56 rounded-md border border-border/60 bg-card p-3 text-xs text-muted-foreground shadow-lg"
+            className="absolute end-4 top-full z-40 mt-2 w-60 rounded-md border border-border/60 bg-card p-3 text-xs text-muted-foreground shadow-lg"
             role="dialog"
           >
             <p className="mb-2 font-medium text-foreground">להתקנה כאפליקציה:</p>
-            <p>
-              לחצו על כפתור השיתוף <span aria-hidden="true">⬆︎</span> בסָפארי, ואז &quot;הוסף למסך הבית&quot;.
-            </p>
-            <Button variant="ghost" size="sm" className="mt-2 h-7" onClick={() => setShowIosHint(false)}>
+            {isIos ? (
+              <p>
+                לחצו על כפתור השיתוף <span aria-hidden="true">⬆︎</span> בסָפארי, ואז &quot;הוסף למסך הבית&quot;.
+              </p>
+            ) : (
+              <p>
+                פתחו את תפריט הדפדפן <span aria-hidden="true">⋮</span> ובחרו &quot;הוספה למסך הבית&quot; או &quot;התקנת האפליקציה&quot;. אם היא כבר מותקנת, פתחו אותה ממסך הבית.
+              </p>
+            )}
+            <Button variant="ghost" size="sm" className="mt-2 h-7" onClick={() => setShowInstallHint(false)}>
               הבנתי
             </Button>
           </div>
