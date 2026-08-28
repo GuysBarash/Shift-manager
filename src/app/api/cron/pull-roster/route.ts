@@ -4,13 +4,14 @@ import { applyOffTimeImport, parseOffTimeWorkbook } from "@/lib/offtime-import";
 import { fetchRosterWorkbook } from "@/lib/roster-fetch";
 import type { Database } from "@/types/database";
 
-// Triggered hourly by vercel.json's `crons` entry — does exactly what the
-// off-time page's "משיכה מ-Drive" button does, just without a human
-// clicking it. No browser context here (serverless function, no DOM), so
-// it uses the plain supabase-js client with the anon key directly rather
-// than either of the app's cookie-aware clients — this route has no user
-// session to carry anyway, and RLS is open to anon in this app's current
-// demo-mode setup.
+// Triggered daily by vercel.json's `crons` entry (04:00 UTC — Vercel's
+// Hobby plan caps cron jobs at once a day; hourly needs Pro) — does exactly
+// what the off-time page's "משיכה מ-Drive" button does, just without a
+// human clicking it. No browser context here (serverless function, no
+// DOM), so it uses the plain supabase-js client with the anon key directly
+// rather than either of the app's cookie-aware clients — this route has no
+// user session to carry anyway, and RLS is open to anon in this app's
+// current demo-mode setup.
 export async function GET(request: Request) {
   // Vercel sends `Authorization: Bearer $CRON_SECRET` on its own
   // cron-triggered requests once that env var is set — checking it stops
