@@ -22,7 +22,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "משמרות",
+    title: "מכלולון",
   },
   // Belt and suspenders — appleWebApp.capable is documented to emit this
   // tag by itself, but it didn't show up in the rendered page, so it's set

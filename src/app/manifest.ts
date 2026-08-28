@@ -6,8 +6,8 @@ import type { MetadataRoute } from "next";
 // only adds the option to pin it as a standalone, app-like icon.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "מנהל משמרות",
-    short_name: "משמרות",
+    name: "מכלולון",
+    short_name: "מכלולון",
     description: "לוח משמרות משותף לצוות",
     start_url: "/",
     display: "standalone",
