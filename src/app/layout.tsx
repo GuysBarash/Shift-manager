@@ -16,6 +16,14 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "מנהל משמרות",
   description: "לוח משמרות משותף לצוות",
+  // iOS Safari doesn't fully honor the web manifest (manifest.ts) the way
+  // Android Chrome does — these are what actually make "Add to Home
+  // Screen" open full-screen there instead of inside Safari's own chrome.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "משמרות",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
