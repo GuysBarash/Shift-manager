@@ -24,6 +24,13 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "משמרות",
   },
+  // Belt and suspenders — appleWebApp.capable is documented to emit this
+  // tag by itself, but it didn't show up in the rendered page, so it's set
+  // directly too. Without it, an iOS "Add to Home Screen" icon still just
+  // opens Safari with its normal chrome instead of full-screen.
+  other: {
+    "apple-mobile-web-app-capable": "yes",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
