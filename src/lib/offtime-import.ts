@@ -1,7 +1,7 @@
 import * as XLSX from "xlsx";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { addDays, parseISODate, toISODate } from "./dates";
-import { createClient } from "./supabase/client";
-import type { Profile } from "@/types/database";
+import type { Database, Profile } from "@/types/database";
 
 // Mirrors scripts/import_offtime.py — keep the two in sync if the source
 // workbook's layout or the home/base convention ever changes.
@@ -104,9 +104,15 @@ export type ApplyOffTimeResult = {
 // Replaces public.time_off for every matched person (delete-then-insert),
 // same semantics as scripts/import_offtime.py's generated SQL — safe to
 // re-run any time the source workbook is revised.
+//
+// Takes the Supabase client rather than creating one itself — the browser
+// button (src/lib/supabase/client) and the hourly cron route (a server
+// context with no DOM, where the browser client can't run) each need their
+// own kind of client, and this function shouldn't have to know which.
 export async function applyOffTimeImport(
   extraction: OffTimeExtraction,
-  profiles: Profile[]
+  profiles: Profile[],
+  supabase: SupabaseClient<Database>
 ): Promise<ApplyOffTimeResult> {
   const byName = new Map(profiles.map((p) => [p.full_name, p] as const));
   const skipped: string[] = [];
@@ -129,8 +135,6 @@ export async function applyOffTimeImport(
         : ranges;
     matched.push({ profile, ranges: finalRanges });
   }
-
-  const supabase = createClient();
 
   if (matched.length > 0) {
     const { error: delError } = await supabase

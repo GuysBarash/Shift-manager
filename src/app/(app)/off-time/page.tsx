@@ -122,7 +122,7 @@ export default function OffTimePage() {
   // Shared by both import paths (file upload and Drive pull) — same
   // extraction shape either way, so applying it is identical.
   async function applyExtraction(extraction: OffTimeExtraction) {
-    const result = await applyOffTimeImport(extraction, profiles);
+    const result = await applyOffTimeImport(extraction, profiles, createClient());
     if (result.skipped.length > 0) {
       toast.warning(`דולג על ${result.skipped.length} שמות שלא נמצאו: ${result.skipped.join(", ")}`);
     }
