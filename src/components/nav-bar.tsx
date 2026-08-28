@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { Download } from "lucide-react";
 import { useDemoIdentity } from "@/lib/demo-identity";
 import { createClient } from "@/lib/supabase/client";
 import { buildColorAssignments } from "@/lib/person-color";
@@ -46,6 +47,7 @@ function isStandalone(): boolean {
 
 export function NavBar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { identity, switchUser } = useDemoIdentity();
   const [profiles, setProfiles] = useState<Profile[]>([]);
   // Android/desktop Chrome fires this once the page qualifies as
@@ -53,6 +55,11 @@ export function NavBar() {
   // native "Install app?" dialog instead of the page having to fake one.
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallHint, setShowInstallHint] = useState(false);
+  // Whether to render the "התקנה" button at all. Deliberately starts false and
+  // is only turned on from an effect: `isStandalone()` can't be evaluated on
+  // the server, so deciding this during render would make the first client
+  // render disagree with the SSR'd HTML and trip a hydration mismatch.
+  const [canInstall, setCanInstall] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -68,6 +75,10 @@ export function NavBar() {
     // any later firing or an `appinstalled` that clears it.
     function sync() {
       setInstallPrompt(window.__installPrompt ?? null);
+      // Offer the install affordance to anyone still browsing in a tab. Once
+      // the app is actually running standalone there is nothing left to
+      // install, so the button disappears there.
+      setCanInstall(!isStandalone());
     }
     function handleBeforeInstallPrompt(e: Event) {
       e.preventDefault();
@@ -88,13 +99,17 @@ export function NavBar() {
   // install itself.
   const isIos = typeof navigator !== "undefined" && /iphone|ipad|ipod/i.test(navigator.userAgent);
 
-  async function handleLogoClick(e: React.MouseEvent) {
-    if (isStandalone()) return; // already installed — plain "go home" link
-    // Fall back to the window-stashed event in case this ran before the
-    // effect's `sync()` (e.g. a very fast tap right after hydration).
+  // The one install routine, shared by the "התקנה" button and the logo click
+  // so the two can't drift apart. Returns true if it handled the interaction
+  // (so the logo can suppress its own navigation), false if there was nothing
+  // to do and the caller should carry on.
+  async function promptInstall(): Promise<boolean> {
+    if (isStandalone()) return false; // already installed — nothing to offer
+    // Read through to the window-stashed event as well, in case this fires
+    // before the effect's `sync()` (e.g. a very fast tap right after
+    // hydration).
     const deferred = installPrompt ?? window.__installPrompt ?? null;
     if (deferred) {
-      e.preventDefault();
       await deferred.prompt();
       await deferred.userChoice;
       // Chrome won't let the same event be prompted twice — drop it either
@@ -102,14 +117,29 @@ export function NavBar() {
       // later and `sync()` picks the new one up.
       window.__installPrompt = null;
       setInstallPrompt(null);
-      return;
+      return true;
     }
-    // No native prompt available: iOS Safari (no install API at all),
-    // a non-Chromium browser, or Chrome hasn't offered it yet. Never let the
-    // tap look dead — show the manual, platform-specific steps instead of
-    // silently navigating home.
-    e.preventDefault();
+    // No native prompt available: iOS Safari (no install API at all), a
+    // non-Chromium browser, or Chrome hasn't offered it yet. Never let the
+    // interaction look dead — show the manual, platform-specific steps.
     setShowInstallHint(true);
+    return true;
+  }
+
+  // Clicking the logo still installs, exactly as before — the button is an
+  // additional, discoverable route to the same thing, not a replacement.
+  async function handleLogoClick(e: React.MouseEvent) {
+    if (isStandalone()) return; // already installed — plain "go home" link
+    // Prevent up front: the await below yields, and by the time it resolves
+    // it's far too late to stop the Link's navigation.
+    e.preventDefault();
+    const handled = await promptInstall();
+    if (!handled) router.push("/");
+  }
+
+  async function handleInstallClick() {
+    setShowInstallHint(false);
+    await promptInstall();
   }
 
   // Needs the full roster (not just this one person) — colors are assigned
@@ -121,24 +151,18 @@ export function NavBar() {
 
   return (
     <header className="border-b border-border/60 bg-card/40">
-      <div className="relative mx-auto flex max-w-6xl px-4 py-3">
-        {/* Nav + identity stack in their own column exactly as before (same
-            two rows, same gap, same flow) — its height is driven purely by
-            its own content, same as before this logo change, so the text
-            never moves. The logo is pulled OUT of that flow entirely
-            (absolute + inset-y-0) so it can span the header's full height
-            edge-to-edge without being able to influence — or be limited by
-            — the column's height (a plain h-full/items-stretch pairing here
-            is circular: with an auto-height row, the percentage falls back
-            to the image's own large intrinsic size and inflates the row).
-            It's pinned to the visual left (inset-inline-end lands there
-            under dir="rtl", the conventional top-left corner regardless of
-            text direction), capped at max-h-24 so it can't spiral upward on
-            narrow screens (nav wraps -> column taller -> logo taller ->
-            even less width left for nav...). The column reserves pe-32,
-            comfortably wider than that capped logo plus the anchor's own
-            tap-target padding, so its content never renders underneath it. */}
-        <div className="flex flex-col justify-center gap-2 pe-32">
+      {/* Two columns side by side, each vertically centered against the other.
+          The logo used to be absolutely positioned and stretched to the
+          header's full height; now that a button sits under it they form one
+          normal-flow column instead, so the header simply grows to fit the
+          pair and the frame shifts down as a whole rather than the button
+          overlapping anything. justify-between keeps the nav at the inline
+          start (visual right under dir="rtl") and the logo stack at the
+          inline end (visual left) — the same sides both occupied before. */}
+      <div className="relative mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
+        {/* min-w-0 lets this column shrink and wrap its nav on narrow screens
+            instead of squeezing the logo stack, which is shrink-0. */}
+        <div className="flex min-w-0 flex-col justify-center gap-2">
           <nav className="flex flex-wrap gap-1">
             {LINKS.map((link) => {
               const active = pathname === link.href;
@@ -174,27 +198,44 @@ export function NavBar() {
             )}
           </div>
         </div>
-        {/* Whole logo is the tap target: the anchor is full header height and
-            adds px-2 on each side (end-2 + px-2 keeps the logo's visual
-            position identical to the old end-4). touch-manipulation drops
+        {/* Logo stacked over its install button. The image gets an explicit
+            height rather than the old h-full/max-h-24 percentage — with the
+            logo back in normal flow a percentage height would be circular
+            (row height depends on the image, image height depends on the row)
+            and would resolve against its 255x256 intrinsic size, blowing the
+            header up. Fixed heights keep the header a predictable size.
+            The whole logo stays the tap target: touch-manipulation drops
             Android's ~300ms double-tap-zoom delay that can make a quick tap
-            feel dead; pointer-events-none + draggable=false on the image mean
-            every press resolves to the anchor and can't turn into an
-            image-drag or long-press menu instead of a click. */}
-        <Link
-          href="/"
-          onClick={handleLogoClick}
-          aria-label="דף הבית / התקנת האפליקציה"
-          className="absolute inset-y-0 end-2 flex touch-manipulation items-center px-2 select-none"
-        >
-          <Image
-            src={logo}
-            alt="מנהל משמרות"
-            priority
-            draggable={false}
-            className="pointer-events-none h-full max-h-24 w-auto"
-          />
-        </Link>
+            feel dead, and pointer-events-none + draggable=false on the image
+            mean every press resolves to the anchor rather than becoming an
+            image-drag or a long-press menu. */}
+        <div className="flex shrink-0 flex-col items-center gap-2">
+          <Link
+            href="/"
+            onClick={handleLogoClick}
+            aria-label="דף הבית / התקנת האפליקציה"
+            className="flex touch-manipulation items-center rounded-md px-2 select-none"
+          >
+            <Image
+              src={logo}
+              alt="מנהל משמרות"
+              priority
+              draggable={false}
+              className="pointer-events-none h-16 w-auto sm:h-20"
+            />
+          </Link>
+          {canInstall && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleInstallClick}
+              className="w-full touch-manipulation"
+            >
+              <Download className="size-4" />
+              התקנה
+            </Button>
+          )}
+        </div>
         {showInstallHint && (
           <div
             className="absolute end-4 top-full z-40 mt-2 w-60 rounded-md border border-border/60 bg-card p-3 text-xs text-muted-foreground shadow-lg"

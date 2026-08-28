@@ -48,11 +48,17 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             Stashing it on `window` here, during HTML parse, is what stops the
             logo's install click from intermittently doing nothing on Android.
             NavBar reads `window.__installPrompt` on mount and also listens for
-            the `installpromptchange` event this dispatches. */}
+            the `installpromptchange` event this dispatches.
+
+            It also registers /sw.js. Chrome on Android only fires
+            `beforeinstallprompt` at all for a page controlled by a service
+            worker with a fetch handler — with no worker registered the event
+            never came, which is the actual reason the install click did
+            nothing. The worker itself caches nothing (see public/sw.js). */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;window.dispatchEvent(new Event('installpromptchange'))});window.addEventListener('appinstalled',function(){window.__installPrompt=null;window.dispatchEvent(new Event('installpromptchange'))})})();",
+              "(function(){window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__installPrompt=e;window.dispatchEvent(new Event('installpromptchange'))});window.addEventListener('appinstalled',function(){window.__installPrompt=null;window.dispatchEvent(new Event('installpromptchange'))});if('serviceWorker'in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register('/sw.js').catch(function(){})})}})();",
           }}
         />
         {children}
