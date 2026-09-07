@@ -15,6 +15,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import Cookies from "js-cookie";
 import { createClient } from "@/lib/supabase/client";
+import { recordActivity, trackVisits } from "@/lib/activity";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -74,6 +75,17 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
     });
   }, []);
 
+  // Traffic logging. Keyed on the user id so it re-arms if someone switches
+  // name, and cleaned up on unmount. trackVisits logs one visit immediately
+  // and then again on foreground-after-a-gap, which is what makes an installed
+  // PWA that is never really "closed" still register as repeat traffic. It is
+  // debounced to roughly one row per session — see src/lib/activity.ts.
+  const activeUserId = identity?.userId;
+  useEffect(() => {
+    if (!activeUserId) return;
+    return trackVisits(activeUserId);
+  }, [activeUserId]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = name.trim();
@@ -97,10 +109,12 @@ export function DemoIdentityProvider({ children }: { children: React.ReactNode }
     }
 
     Cookies.set(COOKIE_NAME, existing.id, { expires: COOKIE_DAYS, sameSite: "lax" });
+    recordActivity(existing.id, "login");
     setIdentity({ userId: existing.id, fullName: existing.full_name || trimmed });
   }
 
   function switchUser() {
+    if (identity) recordActivity(identity.userId, "switch");
     Cookies.remove(COOKIE_NAME);
     setIdentity(null);
   }

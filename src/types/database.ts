@@ -39,6 +39,16 @@ export type TimeOff = {
   created_at: string;
 };
 
+export type UserActivity = {
+  id: string;
+  user_id: string;
+  event_type: "login" | "visit" | "switch";
+  occurred_at: string;
+  user_agent: string | null;
+  path: string | null;
+  display_mode: string | null;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -72,6 +82,17 @@ export type Database = {
           end_date: string;
         };
         Update: Partial<TimeOff>;
+        Relationships: [];
+      };
+      // Append-only traffic log. RLS grants INSERT only, so Row is never
+      // actually fetched by the app — reporting happens in the SQL editor.
+      user_activity: {
+        Row: UserActivity;
+        Insert: Partial<UserActivity> & {
+          user_id: string;
+          event_type: UserActivity["event_type"];
+        };
+        Update: Partial<UserActivity>;
         Relationships: [];
       };
     };
