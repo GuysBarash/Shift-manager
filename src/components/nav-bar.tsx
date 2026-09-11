@@ -148,6 +148,7 @@ export function NavBar() {
   // showed a different dot here than everywhere else in the app.
   const color = buildColorAssignments(profiles).get(identity.userId);
   const isAdmin = selectIsAdmin(profiles, identity.userId);
+  const links = isAdmin ? [...LINKS, { href: "/access", label: "גישה" }] : LINKS;
 
   return (
     <header className="border-b border-border/60 bg-card/40">
@@ -164,7 +165,7 @@ export function NavBar() {
             instead of squeezing the logo stack, which is shrink-0. */}
         <div className="flex min-w-0 flex-col justify-center gap-2">
           <nav className="flex flex-wrap gap-1">
-            {LINKS.map((link) => {
+            {links.map((link) => {
               const active = pathname === link.href;
               return (
                 <Link
