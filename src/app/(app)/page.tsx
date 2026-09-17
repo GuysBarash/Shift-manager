@@ -307,11 +307,14 @@ export default function ShiftsPage() {
     // window, the per-column resume points, and which anchors failed to land
     // on the start grid - so all of that goes in.
     const iso = (ms: number) => new Date(ms).toISOString();
-    const gridOf = (col: string, i: number) => {
-      const step = 6;                       // shift length; half-shift stagger
-      const offset = i * (step / 2);
+    const gridOf = (_col: string, i: number) => {
+      const step = SHIFT_HOURS;
+      // Honour the configured per-column start hours (e.g. [23,1]) so the debug
+      // grid matches what the planner actually generated - not a stale
+      // half-shift assumption.
+      const base = SHIFT_COLUMN_START_HOURS[i] ?? i * (step / 2);
       return Array.from({ length: 24 / step }, (_, k) =>
-        `${String((offset + k * step) % 24).padStart(2, "0")}:00`
+        `${String((((base + k * step) % 24) + 24) % 24).padStart(2, "0")}:00`
       );
     };
 
