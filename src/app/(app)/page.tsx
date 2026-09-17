@@ -30,6 +30,10 @@ import { FileJson } from "lucide-react";
 // shifts — that made an empty board a dead end (no columns meant nowhere to
 // paint a first shift).
 const SHIFT_COLUMNS = ["משמרת א׳", "משמרת ב׳"];
+// Shift length. Two columns + a half-shift stagger, so the app is a 6h planner.
+const SHIFT_HOURS = 6;
+// Column start hours: א׳ on 23,05,11,17 and ב׳ on 01,07,13,19 (2h apart).
+const SHIFT_COLUMN_START_HOURS = [23, 1];
 
 export default function ShiftsPage() {
   const { identity } = useDemoIdentity();
@@ -490,12 +494,22 @@ export default function ShiftsPage() {
    * the fill started at midnight of the clicked day and wrote shifts BEFORE
    * the cells you had just painted.
    */
-  function resumePointsPerColumn(fromMs: number): Record<string, number> {
-    const out: Record<string, number> = {};
+  function resumePointsPerColumn(
+    fromMs: number,
+    presence: { name: string; windows: { from: number; until: number }[] }[]
+  ): { resumeAt: Record<string, number>; continueColumns: string[] } {
+    const SHIFT_MS = SHIFT_HOURS * 3600_000;
+    const LEAVING_SOON_MS = 1.5 * SHIFT_MS;
+    const resumeAt: Record<string, number> = {};
+    const continueColumns: string[] = [];
+    const nameOf = (id: string | null) =>
+      id ? (profileById.get(id)?.full_name?.trim() ?? "") : "";
+
     for (const col of SHIFT_COLUMNS) {
       const inCol = shiftsRef.current
         .filter((s) => s.position === col)
         .map((s) => ({
+          who: nameOf(s.assigned_to),
           start: new Date(`${s.shift_date}T${s.start_time}`).getTime(),
           end:
             s.end_time === "23:59:59"
@@ -503,26 +517,55 @@ export default function ShiftsPage() {
               : new Date(`${s.shift_date}T${s.end_time}`).getTime(),
         }))
         .sort((a, b) => a.start - b.start);
+
+      // Walk forward past everything already booked in this column.
       let t = fromMs;
       let moved = true;
       while (moved) {
         moved = false;
         for (const b of inCol) {
-          if (b.start <= t && b.end > t) {
-            t = b.end;
-            moved = true;
-          }
+          if (b.start <= t && b.end > t) { t = b.end; moved = true; }
         }
       }
-      out[col] = t;
+
+      // Is the piece ending here the tail of an UNDER-LENGTH shift by ONE
+      // person? If so, and they are not about to go home, back up to that
+      // shift's start so the planner completes it rather than switching
+      // someone in mid-shift. "Not leaving soon" is the carve-out the user
+      // asked for: a person heading home should be left to rest, not dragged
+      // back to round out six hours.
+      const runEndAt = inCol.filter((b) => b.end === t).sort((a, b) => a.start - b.start);
+      if (runEndAt.length) {
+        const who = runEndAt[0].who;
+        // contiguous run of this same person ending at t
+        let runStart = t;
+        let advanced = true;
+        while (advanced) {
+          advanced = false;
+          for (const b of inCol) {
+            if (b.who === who && b.end === runStart && b.start < runStart) {
+              runStart = b.start; advanced = true;
+            }
+          }
+        }
+        const runH = (t - runStart) / 3600_000;
+        const window = presence
+          .find((pp) => pp.name === who)
+          ?.windows.find((w) => w.from <= runStart && t <= w.until);
+        const leavingSoon = window ? window.until - t <= LEAVING_SOON_MS : false;
+        if (who && runH > 0 && runH < SHIFT_HOURS && !leavingSoon) {
+          t = runStart;
+          continueColumns.push(col);
+        }
+      }
+      resumeAt[col] = t;
     }
-    return out;
+    return { resumeAt, continueColumns };
   }
 
   function continueFromHere(day: Date, hour: number) {
     // Start from the hour that was clicked, not midnight, and never before it.
     const fromMs = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hour).getTime();
-    const resumeAt = resumePointsPerColumn(fromMs);
     const fromIso = toISODate(day);
 
     // Auto-fill covers ONE MONTH forward, or the end of the calendar if that
@@ -533,9 +576,11 @@ export default function ShiftsPage() {
     const toIso = toISODate(monthOut < calendarEnd ? monthOut : calendarEnd);
     try {
       const people = buildPresenceFromTimeOff(sambatzProfiles, timeOffIndex, rangeStart, RANGE_DAYS);
+      const { resumeAt, continueColumns } = resumePointsPerColumn(fromMs, people);
       const anchors = buildAnchorsFromShifts(shiftsRef.current, profileById);
-      const slots = buildSlots(fromIso, toIso, { columns: SHIFT_COLUMNS, resumeAt });
-      const result = planShifts(people, slots, anchors, { columns: SHIFT_COLUMNS, fromDate: fromIso });
+      const opts = { columns: SHIFT_COLUMNS, shiftHours: SHIFT_HOURS, columnStartHours: SHIFT_COLUMN_START_HOURS };
+      const slots = buildSlots(fromIso, toIso, { ...opts, resumeAt, continueColumns });
+      const result = planShifts(people, slots, anchors, { ...opts, fromDate: fromIso });
       rememberRun({
         at: new Date().toISOString(),
         kind: "autofill",
