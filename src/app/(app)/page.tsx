@@ -224,17 +224,30 @@ export default function ShiftsPage() {
     const toDeleteIds = [...originalIds].filter((id) => !currentIds.has(id));
     const toInsert = shiftsRef.current.filter((s) => s.id.startsWith("temp-"));
 
-    if (toDeleteIds.length > 0) {
-      const { error } = await supabase.from("shifts").delete().in("id", toDeleteIds);
+    // A big edit (e.g. "מחק מכאן" from the very start of the range) can touch
+    // thousands of rows. `.delete().in("id", ids)` serializes every id into
+    // the request's query string, and a few thousand UUIDs blows past the
+    // URL length limit — the request comes back a flat 400 Bad Request with
+    // no indication why. Chunking keeps each request small regardless of
+    // how much changed.
+    const CHUNK_SIZE = 200;
+    function chunk<T>(items: T[], size: number): T[][] {
+      const out: T[][] = [];
+      for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+      return out;
+    }
+
+    for (const ids of chunk(toDeleteIds, CHUNK_SIZE)) {
+      const { error } = await supabase.from("shifts").delete().in("id", ids);
       if (error) {
         toast.error(error.message);
         setSavingEdits(false);
         return;
       }
     }
-    if (toInsert.length > 0) {
+    for (const batch of chunk(toInsert, CHUNK_SIZE)) {
       const { error } = await supabase.from("shifts").insert(
-        toInsert.map((s) => ({
+        batch.map((s) => ({
           shift_date: s.shift_date,
           start_time: s.start_time,
           end_time: s.end_time,
