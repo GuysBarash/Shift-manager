@@ -76,6 +76,12 @@ export type Anchor = {
 export type PlanOptions = {
   shiftHours?: number;      // default 6
   staggerHours?: number;    // default shiftHours/2 — two columns, one changeover per half shift
+  /**
+   * Explicit start hour per column, e.g. [23, 1] -> column A on 23,05,11,17
+   * and column B on 01,07,13,19 (6h shifts, columns 2h apart). Overrides the
+   * uniform stagger; the column count comes from this array's length.
+   */
+  columnStartHours?: number[];
   columns?: string[];       // default the app's two slots
   arriveHour?: number;      // default 10 — expected at base by
   departHour?: number;      // default 10 — leave the morning after the last day
@@ -89,6 +95,12 @@ export type PlanOptions = {
    * has to pick up from there and walk back onto the grid.
    */
   resumeAt?: Record<string, number>;
+  /**
+   * Columns whose resume point is the START of an in-progress shift (someone
+   * painted the first hours and we are completing it). The first slot there is
+   * a full shift, honoured as-is; realignment only starts on the NEXT slot.
+   */
+  continueColumns?: string[];
   /**
    * Rest threshold in hours. A gap of at least this counts as REST; anything
    * less is a "no-rest" event and is minimised. Default 1.5 shifts - 9h on
@@ -189,6 +201,7 @@ const W_SPREAD = 6;        // spread unavoidable no-rest across people
 const W_CHAIN = 900;       // two short gaps running is worse than one, by a lot
 const W_OVERDUE = 90;      // urgency once somebody is approaching the ceiling
 const W_LONGREST = 30;     // mild dislike of a 3-shift gap
+const W_CONTINUE = 1600;   // finish an in-progress shift; must beat overdue+rested+travel (~1400)
 const W_TIGHT = 25;        // stop the same person always taking minimum rest
 const W_REUSE = 60;        // a 5h/7h shift should not land on the same person twice
 
@@ -355,7 +368,10 @@ export function rosterRange(ws: XLSX.WorkSheet): { start: string; end: string } 
 export function buildSlots(startIso: string, endIso: string, opts: PlanOptions = {}): Slot[] {
   const shiftHours = opts.shiftHours ?? 6;
   const staggerHours = opts.staggerHours ?? shiftHours / 2;
-  const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
+  const columnStartHours = opts.columnStartHours;
+  const lanes = columnStartHours
+    ? columnStartHours.length
+    : Math.max(1, Math.round(shiftHours / staggerHours));
   const columns = opts.columns ?? DEFAULT_COLUMNS;
   if (columns.length < lanes) {
     throw new Error(
@@ -376,8 +392,15 @@ export function buildSlots(startIso: string, endIso: string, opts: PlanOptions =
 
   for (let lane = 0; lane < lanes; lane++) {
     const column = columns[lane];
-    const offset = lane * staggerHours;
+    // Offset within the shift cycle. With explicit start hours a column can
+    // sit anywhere (e.g. 23:00 -> 23 % 6 = 5, so slots at 05/11/17/23).
+    const offset = columnStartHours
+      ? (((columnStartHours[lane] % shiftHours) + shiftHours) % shiftHours)
+      : lane * staggerHours;
     let cursor = opts.resumeAt?.[column] ?? atHour(startIso, offset);
+    // A continuation column's first slot is the rest of a shift already begun,
+    // so honour it at full length and only realign from the second slot on.
+    let honourFirst = (opts.continueColumns ?? []).includes(column);
 
     while (cursor < limit) {
       // How far past a grid point we are. Ties go to "late", so the chain is
@@ -386,7 +409,9 @@ export function buildSlots(startIso: string, endIso: string, opts: PlanOptions =
       const drift = rel <= shiftHours / 2 ? rel : rel - shiftHours;
 
       let lengthH = shiftHours;
-      if (drift > 0) lengthH = shiftHours - Math.min(1, drift);
+      if (honourFirst) {
+        honourFirst = false;                 // full shift, no realign this once
+      } else if (drift > 0) lengthH = shiftHours - Math.min(1, drift);
       else if (drift < 0) lengthH = shiftHours + Math.min(1, -drift);
 
       const dateIso = isoOf(new Date(cursor));
@@ -410,7 +435,7 @@ export function buildSlots(startIso: string, endIso: string, opts: PlanOptions =
 // 3. Planning
 // --------------------------------------------------------------------------
 
-type Busy = { start: number; end: number };
+type Busy = { start: number; end: number; column?: string };
 
 function windowFor(person: Person, slot: Slot): PresenceWindow | null {
   for (const w of person.windows) {
@@ -462,7 +487,9 @@ export function planShifts(
   const idealMaxRestH = opts.idealMaxRestH ?? 2 * shiftHours;
   const maxRestH = opts.maxRestH ?? 3 * shiftHours;
   const leavingSoonH = opts.leavingSoonH ?? 1.5 * shiftHours;
-  const lanes = Math.max(1, Math.round(shiftHours / staggerHours));
+  const lanes = opts.columnStartHours
+    ? opts.columnStartHours.length
+    : Math.max(1, Math.round(shiftHours / staggerHours));
   const boundary = opts.fromDate ? atHour(opts.fromDate, 0) : -Infinity;
 
   const byName = new Map(people.map((p) => [p.name, p] as const));
@@ -494,32 +521,40 @@ export function planShifts(
   // visually indistinguishable from the manual placement being overwritten,
   // since the auto-filled piece renders on top in the grid.
   const anchorBusyByColumn = new Map<string, Busy[]>();
-  for (const a of anchors) {
-    anchorAt.set(`${a.dateIso}|${a.startTime}|${a.column}`, a);
+  // HARD RULE: someone not in the base is never assigned. An anchor (an
+  // existing shift) whose person is not present for its WHOLE span is dropped
+  // outright - not added to the grid, not honoured, not counted - so a stale
+  // shift left behind after a time-off edit can never render as an at-home
+  // placement. The slot it held becomes free for someone who is actually here.
+  for (const a of mergeAnchors(anchors, shiftHours)) {
     const start = atHour(a.dateIso, 0) + hmsToMs(a.startTime);
     // The anchor's REAL end. Painting three hours by hand used to be recorded
     // as a full shift, so the slot was marked taken, no row was written for it,
     // and the rest of the shift silently stayed empty.
     const end = anchorEnd(a, start, shiftHours);
+
+    if (a.person) {
+      const p = byName.get(a.person);
+      if (!p) {
+        conflicts.push(`${a.person} משובץ ב-${a.dateIso} אך אינו ברשימת הסבב`);
+        continue;
+      }
+      if (!p.windows.some((w) => start >= w.from && end <= w.until)) {
+        conflicts.push(`${a.person}: שיבוץ ב-${a.dateIso} ${a.startTime} בוטל — אינו בבסיס`);
+        continue;                       // DROP: not in base, never assigned
+      }
+      const list = busy.get(a.person)!;
+      if (list.some((b) => start < b.end && b.start < end)) {
+        conflicts.push(`${a.person}: שתי משמרות מעוגנות חופפות ב-${a.dateIso}`);
+      }
+      list.push({ start, end, column: a.column });
+      hours.set(a.person, (hours.get(a.person) ?? 0) + (end - start) / HOUR);
+    }
+    // honoured only after passing the presence check above
+    anchorAt.set(`${a.dateIso}|${a.startTime}|${a.column}`, a);
     const colList = anchorBusyByColumn.get(a.column) ?? [];
     colList.push({ start, end });
     anchorBusyByColumn.set(a.column, colList);
-
-    if (!a.person) continue;
-    const p = byName.get(a.person);
-    if (!p) {
-      conflicts.push(`${a.person} משובץ ב-${a.dateIso} אך אינו ברשימת הסבב`);
-      continue;
-    }
-    if (!p.windows.some((w) => start >= w.from && end <= w.until)) {
-      conflicts.push(`${a.person}: משמרת מעוגנת ב-${a.dateIso} ${a.startTime} כשאינו בבסיס`);
-    }
-    const list = busy.get(a.person)!;
-    if (list.some((b) => start < b.end && b.start < end)) {
-      conflicts.push(`${a.person}: שתי משמרות מעוגנות חופפות ב-${a.dateIso}`);
-    }
-    list.push({ start, end });
-    hours.set(a.person, (hours.get(a.person) ?? 0) + (end - start) / HOUR);
   }
 
   // -- the rest model -------------------------------------------------------
@@ -557,7 +592,8 @@ export function planShifts(
   const adjusted: AdjustedShift[] = [];
   const overRested: NoRestEvent[] = [];
 
-  for (const slot of ordered) {
+  for (let si = 0; si < ordered.length; si++) {
+    const slot = ordered[si];
     const key = `${slot.dateIso}|${slot.startTime}|${slot.column}`;
     const anchor = anchorAt.get(key);
     if (anchor) {
@@ -599,6 +635,7 @@ export function planShifts(
     let best: string | null = null;
     let bestScore = -Infinity;
     let bestGap = Number.POSITIVE_INFINITY;
+    let bestRunH = 0;                 // >0 when the winner is finishing a shift
 
     for (const p of people) {
       const w = windowFor(p, slot);
@@ -617,14 +654,40 @@ export function planShifts(
       }
       const gapH = hasPrev ? (slot.startMs - prevEnd) / HOUR : Number.POSITIVE_INFINITY;
 
-      // HARD: never back to back.
-      if (hasPrev && gapH < minRestH) continue;
+      // A shift in progress that fell short of full length - someone painted
+      // only the first hour, or a delete-from-here chopped a shift at the
+      // cutoff. Its person may CONTINUE past a back-to-back gap to finish it,
+      // unless they are about to go home. Handled HERE, at the planner, so it
+      // works no matter how the slots were generated - even when the fill
+      // starts mid-shift because the resume did not back up to the real start.
+      const untilDeparture = (w.until - slot.endMs) / HOUR;
+      let runH = 0;
+      const prevHereEndsAtStart = list.some(
+        (b) => b.end === slot.startMs && b.column === slot.column
+      );
+      if (hasPrev && prevEnd === slot.startMs && prevHereEndsAtStart) {
+        let runStart = prevEnd;
+        let adv = true;
+        while (adv) {
+          adv = false;
+          for (const b of list) {
+            if (b.end === runStart && b.start < runStart && b.start >= w.from
+                && b.column === slot.column) {
+              runStart = b.start; adv = true;
+            }
+          }
+        }
+        runH = (slot.startMs - runStart) / HOUR;
+      }
+      const continuing = runH > 0 && runH < shiftHours && untilDeparture > leavingSoonH;
+
+      // HARD: never back to back - except a genuine shift continuation.
+      if (hasPrev && gapH < minRestH && !continuing) continue;
 
       // B and C: rest either side of travel. Infinite mid-stay, so it only
       // bites at the edges. Capped - past a day more is not worth trading for.
       const firstOfStay = !list.some((b) => b.start >= w.from && b.end <= w.until);
       const sinceArrival = (slot.startMs - w.from) / HOUR;
-      const untilDeparture = (w.until - slot.endMs) / HOUR;
       const bindingRest = Math.min(
         firstOfStay ? sinceArrival : Number.POSITIVE_INFINITY,
         untilDeparture
@@ -645,7 +708,7 @@ export function planShifts(
       }
 
       // A: how far short of a real rest this would be, 0 when it is fine.
-      const shortBy = hasPrev ? Math.max(0, restThresholdH - gapH) : 0;
+      const shortBy = (hasPrev && !continuing) ? Math.max(0, restThresholdH - gapH) : 0;
       // Saturate at the IDEAL, not at the threshold. Saturating at the
       // threshold made 9h and 12h score identically, so the tiebreak fell to
       // load and whoever was lightest got grabbed the moment they became
@@ -677,6 +740,7 @@ export function planShifts(
       const overBy = leavingSoon ? 0 : Math.max(0, idleH - idealMaxRestH);
 
       const score =
+        (continuing ? W_CONTINUE : 0) +
         W_OVERDUE * Math.min(overBy, 2 * shiftHours) +
         (!leavingSoon && idleH >= maxRestH ? -W_LONGREST : 0) +
         -W_NOREST * (shortBy / restThresholdH) -
@@ -692,6 +756,7 @@ export function planShifts(
         bestScore = score;
         best = p.name;
         bestGap = gapH;
+        bestRunH = continuing ? runH : 0;
       }
     }
 
@@ -731,9 +796,43 @@ export function planShifts(
         lengthH: slot.lengthH,
       });
     }
-    busy.get(best)!.push({ start: slot.startMs, end: slot.endMs });
-    hours.set(best, (hours.get(best) ?? 0) + slot.lengthH);
-    assignments.push({ slot, person: best, anchored: false });
+    // Finishing a shift: give this person only enough of the slot to reach a
+    // full shift from where their run began, and hand the rest back as a new
+    // slot for the next person.
+    let take = slot;
+    if (bestRunH > 0) {
+      const completeEnd = slot.startMs + (shiftHours - bestRunH) * HOUR;
+      if (completeEnd < slot.endMs) {
+        take = { ...slot, endMs: completeEnd, lengthH: (completeEnd - slot.startMs) / HOUR, adjusted: 0 };
+        const remainder: Slot = {
+          ...slot,
+          startMs: completeEnd,
+          startTime: hhmmss(completeEnd),
+          lengthH: (slot.endMs - completeEnd) / HOUR,
+          adjusted: (slot.endMs - completeEnd) / HOUR - shiftHours,
+        };
+        ordered.splice(si + 1, 0, remainder);
+      }
+    }
+    busy.get(best)!.push({ start: take.startMs, end: take.endMs, column: take.column });
+    hours.set(best, (hours.get(best) ?? 0) + take.lengthH);
+    assignments.push({ slot: take, person: best, anchored: false });
+  }
+
+  // HARD RULE, final net: no assignment may stand for someone not in the base
+  // for its whole span. Auto-fill already enforces this per candidate and
+  // at-home anchors were dropped above; this catches anything that slips
+  // through (e.g. a slot split across a departure) and turns it into an
+  // unfilled slot rather than an at-home placement.
+  for (const a of assignments) {
+    if (!a.person) continue;
+    const p = byName.get(a.person);
+    const ok = p && p.windows.some((w) => a.slot.startMs >= w.from && a.slot.endMs <= w.until);
+    if (!ok) {
+      conflicts.push(`${a.person}: שיבוץ ב-${a.slot.dateIso} ${a.slot.startTime} בוטל — אינו בבסיס`);
+      unfilled.push(a.slot);
+      a.person = null;
+    }
   }
 
   const gaps = restGaps(people, busy);
@@ -772,6 +871,43 @@ export function planShifts(
  * how toShiftRows writes a piece that runs to midnight, so it means the next
  * midnight, not a second before it.
  */
+/**
+ * Merge a person's contiguous same-day, same-column anchors into one.
+ *
+ * Painting is stored as separate 1-hour rows, so a 2-hour manual shift arrives
+ * as two anchors. Left apart, the completion logic and the mid-shift detection
+ * both see a 1-hour fragment instead of the real run. Cross-midnight pieces are
+ * left alone - their string end time cannot represent the next day.
+ */
+function mergeAnchors(anchors: Anchor[], shiftHours: number): Anchor[] {
+  const key = (a: Anchor) => `${a.person ?? ""}|${a.column}|${a.dateIso}`;
+  const groups = new Map<string, Anchor[]>();
+  for (const a of anchors) {
+    const g = groups.get(key(a)) ?? [];
+    g.push(a);
+    groups.set(key(a), g);
+  }
+  const out: Anchor[] = [];
+  for (const g of groups.values()) {
+    g.sort((x, y) => hmsToMs(x.startTime) - hmsToMs(y.startTime));
+    let cur = { ...g[0] };
+    let curEnd = anchorEnd(cur, atHour(cur.dateIso, 0) + hmsToMs(cur.startTime), shiftHours);
+    for (let i = 1; i < g.length; i++) {
+      const startMs = atHour(g[i].dateIso, 0) + hmsToMs(g[i].startTime);
+      if (startMs <= curEnd) {                       // contiguous or overlapping
+        const e = anchorEnd(g[i], startMs, shiftHours);
+        if (e > curEnd) { curEnd = e; cur.endTime = g[i].endTime; }
+      } else {
+        out.push(cur);
+        cur = { ...g[i] };
+        curEnd = anchorEnd(cur, startMs, shiftHours);
+      }
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
 function anchorEnd(a: Anchor, startMs: number, shiftHours: number): number {
   if (!a.endTime) return startMs + shiftHours * HOUR;
   const midnight = atHour(addDaysIso(a.dateIso, 1), 0);
