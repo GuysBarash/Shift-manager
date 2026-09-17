@@ -835,6 +835,30 @@ export function planShifts(
     }
   }
 
+  // HARD RULE, final net: nobody works longer than one shift in a row and
+  // nobody is in two places at once. A single assignment may never exceed
+  // shiftHours + 1 (the 7h realignment ceiling), and a person's assignments
+  // may never overlap in time (which a same-person, two-column clash would
+  // be). Either is a bug upstream; void it here so it can never ship.
+  const seen = new Map<string, Busy[]>();
+  for (const a of assignments) {
+    if (!a.person) continue;
+    const dur = (a.slot.endMs - a.slot.startMs) / HOUR;
+    const mine = seen.get(a.person) ?? [];
+    const clash = mine.some((b) => a.slot.startMs < b.end && b.start < a.slot.endMs);
+    if (dur > shiftHours + 1 || clash) {
+      conflicts.push(
+        `${a.person}: שיבוץ ב-${a.slot.dateIso} ${a.slot.startTime} בוטל — ` +
+        (clash ? "חפיפה עם משמרת אחרת" : `${Math.round(dur)} שעות רצופות`)
+      );
+      unfilled.push(a.slot);
+      a.person = null;
+      continue;
+    }
+    mine.push({ start: a.slot.startMs, end: a.slot.endMs });
+    seen.set(a.person, mine);
+  }
+
   const gaps = restGaps(people, busy);
   const worst = gaps.reduce<number | null>((min, g) => {
     const local = [g.arrivalRestH, g.departureRestH].filter((v): v is number => v !== null);
